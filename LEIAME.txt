@@ -85,6 +85,8 @@ B) VIA RIVATUNER STATISTICS SERVER (RTSS / MSI AFTERBURNER):
 --------------------------------------------------------------------------------
 Voce pode abrir o arquivo 'sfa2_patch.ini' em qualquer editor de texto:
 - Force60FPS = 1          : Trava o jogo a 60 FPS estritos sem pulos de quadro.
+- ContinuousBGMOnKO = 1   : Mantem a musica do cenario tocando continuamente sem
+                            mute/pausa durante o 'K.O.!' e transicao de rounds (Arcade).
 - Player1_Index = 0       : Define qual controle e o Player 1.
 - Player2_Index = 1       : Define qual controle e o Player 2.
 - SwapTriggersBumpers = 1 : Troca RB por RT (se preferir HP no gatilho e HK no bumper).

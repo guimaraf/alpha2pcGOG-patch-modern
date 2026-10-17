@@ -86,6 +86,7 @@ static int g_cfgSwapTriggersBumpers = 0; /* 0: RB=HP, RT=HK. 1: RT=HP, RB=HK */
 static int g_cfgPlayer1Index = 0;      /* XInput Index for Player 1 */
 static int g_cfgPlayer2Index = 1;      /* XInput Index for Player 2 */
 static int g_cfgForce60FPS = 1;        /* Lock 60 FPS and disable engine frame skips */
+static int g_cfgContinuousBGMOnKO = 1; /* Keep BGM playing continuously on K.O. (Arcade CPS2 behavior) */
 static int g_cfgLogEnabled = 0;
 
 static void LogMsg(const char* fmt, ...) {
@@ -116,11 +117,13 @@ static void LoadConfig(void) {
 
     g_cfgForce60FPS = GetPrivateProfileIntA("Graphics", "Force60FPS", 1, iniPath);
 
+    g_cfgContinuousBGMOnKO = GetPrivateProfileIntA("Audio", "ContinuousBGMOnKO", 1, iniPath);
+
     g_cfgLogEnabled = GetPrivateProfileIntA("Debug", "EnableLog", 0, iniPath);
 
-    LogMsg("Config loaded: XInput=%d, Deadzone=%d, Macros=%d, SwapTB=%d, P1Index=%d, P2Index=%d, Force60FPS=%d\n",
+    LogMsg("Config loaded: XInput=%d, Deadzone=%d, Macros=%d, SwapTB=%d, P1Index=%d, P2Index=%d, Force60FPS=%d, ContinuousBGM=%d\n",
            g_cfgXInputEnabled, g_cfgDeadzone, g_cfgEnableMacros, g_cfgSwapTriggersBumpers,
-           g_cfgPlayer1Index, g_cfgPlayer2Index, g_cfgForce60FPS);
+           g_cfgPlayer1Index, g_cfgPlayer2Index, g_cfgForce60FPS, g_cfgContinuousBGMOnKO);
 }
 
 static void InitXInput(void) {
@@ -396,6 +399,45 @@ HRESULT WINAPI DirectInputCreateEx(HINSTANCE hinst, DWORD dwVersion, REFIID riid
     return E_FAIL;
 }
 
+/*
+ * Apply Audio Patches for Continuous BGM on K.O. (Arcade CPS2 behavior)
+ *
+ * Technical details:
+ * 1. At 0x00430ee9, Capcom's battle engine calls BGM_Dispatch(6, 2) (Fade Out over 2 seconds)
+ *    when health drops to 0 on K.O. We patch the function entry with 'RET' (0xC3), completely
+ *    preventing the music from ducking/muting during K.O.
+ * 2. At 0x00430494, during the round winner's victory pose (State 5), the engine executes
+ *    BGM_Dispatch(5, 1) (Fade In over 1 second). We NOP out this 12-byte call so volume stays
+ *    steadily at 100% without any volume ducking or oscillation.
+ * 3. Match end (final round) still cleanly fades out via 0x0042f6c2 / 0x0042f406 when transitioning
+ *    to the victory quote / stats screen.
+ */
+static void ApplyAudioPatches(void) {
+    if (!g_cfgContinuousBGMOnKO) return;
+
+    DWORD oldProtect;
+
+    /* 1. Neutralize K.O. Fade Out function at 0x00430ee9 */
+    BYTE* pKOFadeFunc = (BYTE*)0x00430ee9;
+    if (VirtualProtect(pKOFadeFunc, 1, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        *pKOFadeFunc = 0xC3; /* ret */
+        VirtualProtect(pKOFadeFunc, 1, oldProtect, &oldProtect);
+        LogMsg("Applied audio patch: neutralized K.O. BGM Fade Out at 0x00430ee9 (RET)\n");
+    } else {
+        LogMsg("Failed to patch K.O. BGM Fade Out at 0x00430ee9\n");
+    }
+
+    /* 2. NOP out win pose Fade In call at 0x00430494 (12 bytes) */
+    BYTE* pWinPoseFadeIn = (BYTE*)0x00430494;
+    if (VirtualProtect(pWinPoseFadeIn, 12, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        memset(pWinPoseFadeIn, 0x90, 12); /* 12 NOPs */
+        VirtualProtect(pWinPoseFadeIn, 12, oldProtect, &oldProtect);
+        LogMsg("Applied audio patch: NOP'd win pose BGM Fade In at 0x00430494 (12 NOPs)\n");
+    } else {
+        LogMsg("Failed to patch win pose BGM Fade In at 0x00430494\n");
+    }
+}
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     if (fdwReason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hinstDLL);
@@ -403,6 +445,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         LogMsg("SFA2 XInput & Modernization Mod loaded.\n");
         InitXInput();
         InstallIATHook();
+        ApplyAudioPatches();
     } else if (fdwReason == DLL_PROCESS_DETACH) {
         if (g_hRealDInput) {
             FreeLibrary(g_hRealDInput);
@@ -415,3 +458,4 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     }
     return TRUE;
 }
+
