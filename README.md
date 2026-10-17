@@ -192,6 +192,12 @@ clang -target i686-w64-windows-gnu -shared -O2 -s src/dinput_xinput.c src/dinput
 * **WinMM Hooking**: `ALPHA2.EXE` imports `joyGetPosEx` from `WINMM.dll` with an IAT entry at `0x00cb0684`. The game never queries `JOY_RETURNPOV` or `JOY_RETURNZ`, which caused the lack of D-Pad and trigger support on modern gamepads. Our wrapper intercepts `joyGetPosEx` calls, queries `XInputGetState`, and feeds translated coordinate and button masks directly to the game.
 * **Capcom In-Game Polling (`0x0054dac7`)**: Unlike the prototype routine at `0x0043d460`, the active gameplay routine maps `Button 4` to LP, `Button 1` to MP, `Button 2` to HP, `Button 0` to LK, `Button 3` to MK, `Button 5` to HK, `Button 8` to Start (`0x800`), and `Button 9` to Coin (`0x100`).
 * **Frame-Skip Override**: Located at `0x0055ff18`, the engine dynamically altered `0x00bf5560` (frame delay) and `0x00bfe782` (skip factor) whenever timing exceeded 17ms. The wrapper continuously enforces full-rate rendering and clears the auto-skip flag (`*(WORD*)0x00bebf76 &= ~0x4000`).
+* **Fullscreen & Windowed Architecture (`Alt + Enter`)**:
+  * `ALPHA2.EXE` initializes DirectDraw in exclusive fullscreen cooperation (`DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN`), with rendering mode tracked at `*(WORD*)0x00bf00e8` (Bit `0x8000`: 1 = Fullscreen, 0 = Windowed).
+  * Simply changing Win32 styles (`SetWindowLongA`) fails because DDrawCompat's D3D11 presentation pipeline enforces a borderless desktop overlay while DirectDraw remains in exclusive mode.
+  * Our hook implements a clean two-way transition:
+    * **Fullscreen to Windowed**: Disengages exclusive mode via `IDirectDraw::RestoreDisplayMode` and `IDirectDraw::SetCooperativeLevel(hWnd, DDSCL_NORMAL)`, clears Bit `0x8000` at `0x00bf00e8`, resizes the window with 4:3 frame metrics (`AdjustWindowRect`), creates/attaches an `IDirectDrawClipper` to the Primary Surface (`*(void**)0x00bf0040`), updates client screen bounds at `0x00bebdb0`, and invokes Capcom's internal clipper synchronizer (`0x0043ec60`).
+    * **Windowed to Fullscreen**: Restores borderless style (`WS_POPUP`), re-engages `DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN | DDSCL_ALLOWREBOOT`, sets Bit `0x8000` at `0x00bf00e8`, restores surfaces (`IDirectDrawSurface::Restore`), and re-synchronizes coordinates.
 
 ---
 

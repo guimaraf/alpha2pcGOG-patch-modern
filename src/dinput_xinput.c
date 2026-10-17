@@ -2,6 +2,7 @@
 #define CINTERFACE
 #define COBJMACROS
 #include <windows.h>
+#include <ddraw.h>
 #include <mmsystem.h>
 #include <objbase.h>
 #include <mmdeviceapi.h>
@@ -251,14 +252,32 @@ static int UpdateAudioSessionDisplayName(const WCHAR* wszName) {
 
 /*
  * Window Mode Toggle (Alt + Enter)
- * Smoothly toggles between Borderless Fullscreen and Windowed mode with a 4:3 aspect ratio.
+ * Seamlessly transitions between DirectDraw Borderless Fullscreen and Windowed mode with a 4:3 aspect ratio.
  */
 static int g_bIsWindowed = 0;
 static DWORD g_lastToggleTick = 0;
 
+static void SyncWindowClientCoordinates(HWND hWnd) {
+    RECT rcClient;
+    if (GetClientRect(hWnd, &rcClient)) {
+        POINT ptTL = { rcClient.left, rcClient.top };
+        POINT ptBR = { rcClient.right, rcClient.bottom };
+        ClientToScreen(hWnd, &ptTL);
+        ClientToScreen(hWnd, &ptBR);
+        *(LONG*)0x00bebdb0 = ptTL.x;
+        *(LONG*)0x00bebdb4 = ptTL.y;
+        *(LONG*)0x00bebdb8 = ptBR.x;
+        *(LONG*)0x00bebdbc = ptBR.y;
+
+        typedef void (*PFN_CapcomClipperUpdate)(void);
+        PFN_CapcomClipperUpdate pfnUpdate = (PFN_CapcomClipperUpdate)0x0043ec60;
+        if (pfnUpdate) pfnUpdate();
+    }
+}
+
 static void ToggleWindowedMode(void) {
     DWORD now = timeGetTime();
-    if (now - g_lastToggleTick < 400) return; /* Debounce 400ms */
+    if (now - g_lastToggleTick < 500) return; /* Debounce 500ms */
     g_lastToggleTick = now;
 
     HWND hWnd = *(HWND*)0x00bebf64;
@@ -267,8 +286,30 @@ static void ToggleWindowedMode(void) {
     }
     if (!hWnd || !IsWindow(hWnd)) return;
 
-    if (!g_bIsWindowed) {
-        /* Switch to Windowed Mode */
+    volatile WORD* pEngineMode = (volatile WORD*)0x00bf00e8;
+    int isCurrentlyFullscreen = pEngineMode ? ((*pEngineMode & 0x8000) != 0) : (!g_bIsWindowed);
+
+    IDirectDraw* pDD = *(IDirectDraw**)0x00bf00e4;
+    IDirectDrawSurface* pPrimary = *(IDirectDrawSurface**)0x00bf0040;
+
+    if (isCurrentlyFullscreen) {
+        /*
+         * ETAPA A: Transicao de Tela Cheia -> Modo Janela
+         */
+
+        /* 1. Desengatar a Configuracao de Tela Cheia do DirectDraw */
+        if (pDD && (DWORD)pDD >= 0x10000) {
+            IDirectDraw_RestoreDisplayMode(pDD);
+            IDirectDraw_SetCooperativeLevel(pDD, hWnd, DDSCL_NORMAL);
+            LogMsg("DirectDraw cooperative level set to DDSCL_NORMAL\n");
+        }
+
+        /* 2. Atualizar a Flag Interna da Capcom */
+        if (pEngineMode) {
+            *pEngineMode &= ~0x8000;
+        }
+
+        /* 3. Alterar o Estilo da Janela e Redimensionar */
         DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE;
 
         RECT rc = { 0, 0, g_cfgWindowedWidth, g_cfgWindowedHeight };
@@ -291,15 +332,35 @@ static void ToggleWindowedMode(void) {
         SetWindowPos(hWnd, HWND_NOTOPMOST, winX, winY, winW, winH, 
                      SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         ClipCursor(NULL);
+        ShowCursor(TRUE);
 
-        /* Synchronize Capcom engine internal windowed flag */
-        volatile WORD* pEngineMode = (volatile WORD*)0x00bf00e8;
-        if (pEngineMode) *pEngineMode &= ~0x8000;
+        /* 4. Adaptar Clipper e Superficies */
+        if (pPrimary && (DWORD)pPrimary >= 0x10000 && pDD && (DWORD)pDD >= 0x10000) {
+            IDirectDrawClipper* pClipper = NULL;
+            IDirectDrawSurface_GetClipper(pPrimary, &pClipper);
+            if (!pClipper) {
+                if (SUCCEEDED(IDirectDraw_CreateClipper(pDD, 0, &pClipper, NULL)) && pClipper) {
+                    IDirectDrawClipper_SetHWnd(pClipper, 0, hWnd);
+                    IDirectDrawSurface_SetClipper(pPrimary, pClipper);
+                    *(void**)0x00bebf70 = pClipper;
+                    LogMsg("Created and attached IDirectDrawClipper to Primary Surface\n");
+                }
+            } else {
+                IDirectDrawClipper_SetHWnd(pClipper, 0, hWnd);
+                IDirectDrawClipper_Release(pClipper);
+            }
+        }
 
+        SyncWindowClientCoordinates(hWnd);
         g_bIsWindowed = 1;
-        LogMsg("Switched to Windowed mode: %dx%d at (%d, %d)\n", winW, winH, winX, winY);
+        LogMsg("Switched to Windowed mode: %dx%d (client %dx%d) at (%d, %d)\n",
+               winW, winH, g_cfgWindowedWidth, g_cfgWindowedHeight, winX, winY);
     } else {
-        /* Switch back to Borderless Fullscreen */
+        /*
+         * ETAPA B: Transicao de Modo Janela -> Tela Cheia
+         */
+
+        /* 1. Restaurar a Configuracao Padrao de Tela Cheia (Borderless Fullscreen) */
         DWORD style = WS_POPUP | WS_VISIBLE;
 
         HMONITOR hMon = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
@@ -316,11 +377,25 @@ static void ToggleWindowedMode(void) {
         SetWindowLongA(hWnd, GWL_STYLE, style);
         SetWindowPos(hWnd, HWND_TOP, scrX, scrY, scrW, scrH, 
                      SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        ShowCursor(FALSE);
 
-        /* Synchronize Capcom engine internal fullscreen flag */
-        volatile WORD* pEngineMode = (volatile WORD*)0x00bf00e8;
-        if (pEngineMode) *pEngineMode |= 0x8000;
+        /* 2. Atualizar a Flag Interna da Capcom */
+        if (pEngineMode) {
+            *pEngineMode |= 0x8000;
+        }
 
+        /* 3. Reativar a Exclusividade do DirectDraw */
+        if (pDD && (DWORD)pDD >= 0x10000) {
+            IDirectDraw_SetCooperativeLevel(pDD, hWnd, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN | DDSCL_ALLOWREBOOT);
+            LogMsg("DirectDraw cooperative level set to DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN\n");
+        }
+
+        /* 4. Restaurar Superficies de Renderizacao */
+        if (pPrimary && (DWORD)pPrimary >= 0x10000) {
+            IDirectDrawSurface_Restore(pPrimary);
+        }
+
+        SyncWindowClientCoordinates(hWnd);
         g_bIsWindowed = 0;
         LogMsg("Switched to Fullscreen mode: %dx%d at (%d, %d)\n", scrW, scrH, scrX, scrY);
     }
@@ -337,6 +412,12 @@ static LRESULT CALLBACK ModWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
         }
         return 0; /* Consumed: avoids Windows default system beep */
     }
+
+    /* Keep Capcom client rectangle synchronized when window moves or resizes in windowed mode */
+    if (g_bIsWindowed && (uMsg == WM_MOVE || uMsg == WM_SIZE || uMsg == WM_EXITSIZEMOVE)) {
+        SyncWindowClientCoordinates(hWnd);
+    }
+
     if (g_pfnOrigWndProc) {
         return CallWindowProcA(g_pfnOrigWndProc, hWnd, uMsg, wParam, lParam);
     }
