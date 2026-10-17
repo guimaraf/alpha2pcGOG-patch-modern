@@ -84,14 +84,19 @@ B) VIA RIVATUNER STATISTICS SERVER (RTSS / MSI AFTERBURNER):
 6. PERSONALIZACAO (sfa2_patch.ini)
 --------------------------------------------------------------------------------
 Voce pode abrir o arquivo 'sfa2_patch.ini' em qualquer editor de texto:
-- Force60FPS = 1          : Trava o jogo a 60 FPS estritos sem pulos de quadro.
-- ContinuousBGMOnKO = 1   : Mantem a musica do cenario tocando continuamente sem
-                            mute/pausa durante o 'K.O.!' e transicao de rounds (Arcade).
-- Player1_Index = 0       : Define qual controle e o Player 1.
-- Player2_Index = 1       : Define qual controle e o Player 2.
-- SwapTriggersBumpers = 1 : Troca RB por RT (se preferir HP no gatilho e HK no bumper).
-- EnableMacros = 0        : Desativa as macros de 3 socos / 3 chutes em LB e LT.
-- Deadzone = 7849         : Ajusta a sensibilidade da zona morta do analogico.
+- Force60FPS = 1             : Trava o jogo a 60 FPS estritos sem pulos de quadro.
+- ContinuousBGMOnKO = 1      : Mantem a musica do cenario tocando continuamente sem
+                               mute/pausa durante o 'K.O.!' e transicao de rounds (Arcade).
+- DuckBGMOnSuperKO = 1       : Ducking seletivo de volume ao terminar com Super Combo.
+                               Se o golpe final for golpe normal ou especial (Shoryuken,
+                               Hadouken, etc.), o volume continua a 100%. Se for Super,
+                               faz fade para o percentual abaixo.
+- SuperKOBGMVolumePercent = 30: Percentual do volume da musica no Super Finish (30%).
+- Player1_Index = 0          : Define qual controle e o Player 1.
+- Player2_Index = 1          : Define qual controle e o Player 2.
+- SwapTriggersBumpers = 1    : Troca RB por RT (se preferir HP no gatilho e HK no bumper).
+- EnableMacros = 0           : Desativa as macros de 3 socos / 3 chutes em LB e LT.
+- Deadzone = 7849            : Ajusta a sensibilidade da zona morta do analogico.
 
 --------------------------------------------------------------------------------
 7. DESINSTALACAO

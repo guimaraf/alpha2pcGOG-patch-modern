@@ -24,10 +24,11 @@ This patch enables smooth 60 FPS gameplay on Windows 10 and Windows 11, translat
   * Independent analog triggers (fixes the legacy Z-axis trigger-canceling bug).
   * Out-of-the-box support for Xbox, 8BitDo (M30, Pro 2, Ultimate), DualShock/DualSense (via DS4Windows/Steam), and generic XInput devices.
   * **Strict 2-Player Controller Isolation**: Controller Index 0 is exclusively assigned to Player 1, and Index 1 to Player 2. When only one controller is plugged in, Player 2 is kept completely disconnected—preventing phantom inputs or accidental 2P challenger starts.
-* **Arcade-Accurate Continuous BGM (No K.O. Ducking)**:
+* **Arcade-Accurate Continuous BGM & Selective Super Combo Finish Ducking**:
   * In the 1998 PC release, Capcom implemented an intentional volume-ducking routine that faded out the stage BGM over 2 seconds whenever health reached 0, muting the music while the "K.O.!" voice played, before fading back in during the win pose.
-  * This patch neutralizes the round-end fade-out routine (`0x00430ee9`) and victory-pose fade-in (`0x00430494`), keeping the stage music playing continuously and seamlessly through the K.O. hit, announcer call, slow motion, win pose, and straight into Round 2—matching original CPS2 arcade behavior.
-  * When the match is completely over (final round), the BGM still cleanly fades out into the victory quotes / character stats screen.
+  * **Normal & Special Move Finishes**: When the round ends with normal attacks or regular special moves (Shoryuken, Hadouken, Tatsumaki, throws, etc.), the music now plays continuously and seamlessly at **100% volume** across the K.O. call, announcer voice, win pose, and straight into Round 2—matching original CPS2 arcade boards.
+  * **Super Combo Finishes**: When a round ends with a Super Combo (Super Finish), the patch detects the lethal move type in real-time (`*(BYTE*)0x00bdc5ae == 0xFF` and winner finish code `0x255 == 6`) and smoothly fades the BGM volume down to **30%** (configurable). This highlights the Super Finish background explosion and announcer voice while keeping the music playing in the background, smoothly restoring back to 100% volume when the next round begins.
+  * When the match is completely over (final round), the BGM cleanly fades out into the victory quotes / character stats screen.
 * **Locked 60 FPS & Frame-Skip Bypass**:
   * Overrides Capcom's legacy Pentium II "Auto Frame-Skip" mechanism in memory, preventing the engine from dynamically dropping down to 30, 20, or 15 FPS.
   * Synchronizes presentation with the desktop window manager (DWM) for stutter-free frame pacing.
@@ -114,6 +115,13 @@ Player2_Index = 1
 ; 1 = Enabled (Recommended), 0 = Disabled (PC port default ducking behavior)
 ContinuousBGMOnKO = 1
 
+; Selective BGM volume ducking on Super Combo finish (1 = Enabled, 0 = Disabled)
+; Normal & Special finishes (Shoryuken, Hadouken) stay at 100% volume.
+DuckBGMOnSuperKO = 1
+
+; Target BGM volume percent during Super Combo finish (default: 30)
+SuperKOBGMVolumePercent = 30
+
 [XInput]
 ; Enable native XInput hook (1 = Enabled, 0 = Disabled)
 Enabled = 1
@@ -142,12 +150,12 @@ The source code for the input wrapper is located in the [`src/`](src/) directory
 
 ### Requirements:
 * Clang or GCC targeting 32-bit Windows (`i686-w64-windows-gnu`).
-* Windows SDK headers (`windows.h`, `mmsystem.h`, `objbase.h`).
+* Windows SDK headers (`windows.h`, `mmsystem.h`, `objbase.h`, `math.h`).
 
 ### Build Command:
 Run [`src/build.bat`](src/build.bat) or compile manually:
 ```bash
-clang -target i686-w64-windows-gnu -shared -O2 -s src/dinput_xinput.c src/dinput.def -o dinput.dll -lwinmm
+clang -target i686-w64-windows-gnu -shared -O2 -s src/dinput_xinput.c src/dinput.def -o dinput.dll -lwinmm -lm
 ```
 
 ---
@@ -155,7 +163,15 @@ clang -target i686-w64-windows-gnu -shared -O2 -s src/dinput_xinput.c src/dinput
 ## Technical Architecture & Reversing Notes
 
 * **DirectSound Architecture & Independent Channels**: `ALPHA2.EXE` utilizes separate DirectSound secondary buffers (`IDirectSoundBuffer`) for Sound Effects (`[SoundManager + se_id*4 + 8]`) and Background Music (`[SoundManager + 0x4030]`). Sound effects and BGM do not collide or share physical channels.
-* **The K.O. Ducking Mechanism**: In the 1998 PC release, when player HP hits 0, routine `0x00430a9b` calls `0x00430ee9`, which triggers `BGM_Dispatch(command = 6, time = 2)` to fade out the BGM buffer over 2 seconds. When the winner enters victory pose (`0x00430481`), routine `0x00430494` executes `BGM_Dispatch(command = 5, time = 1)` to fade the music back in. Our patch patches `0x00430ee9` with `RET` (`0xC3`) and NOPs out `0x00430494` (12 bytes), achieving unbroken, continuous playback matching CPS2 arcade boards.
+* **Super Combo Detection & Selective Ducking**:
+  * In the original PC port, when health hits 0, `0x00430a9b` called `0x00430ee9` (`BGM_Dispatch(6, 2)`), fading out music on *every* K.O.
+  * Our mod hooks `0x00430ee9` and inspects the lethal hit move flags:
+    1. Global Super Finish explosion spawner flag: `*(BYTE*)0x00bdc5ae == 0xFF`.
+    2. Winner entity lethal finish code: `*(BYTE*)(winner_obj + 0x255) == 6`.
+  * If the lethal hit is a **Normal move** or **Special move** (Hadouken, Shoryuken, normal attacks, throws), the hook returns immediately (`RET`), keeping the stage music playing at **100% volume** without interruption.
+  * If the lethal hit is a **Super Combo**, our state machine initiates a smooth 1.0-second linear logarithmic fade down to **30% volume** ($-1046\text{ mB}$ via DirectSound `SetVolume` on `*(IDirectSoundBuffer**)(0x009c9bc0 + 0x4030)`).
+  * When the next round begins (`battleState == 0` in `*(WORD*)(0x00be05b4 + 0x1c)`), the volume smoothly fades back up to 100% and resets the Super flag.
+  * In the final match-deciding round, Capcom's natural match-end fade (`0x0042f406` / `0x00cae530 != 0`) is respected, cleanly transitioning to the victory screen.
 * **WinMM Hooking**: `ALPHA2.EXE` imports `joyGetPosEx` from `WINMM.dll` with an IAT entry at `0x00cb0684`. The game never queries `JOY_RETURNPOV` or `JOY_RETURNZ`, which caused the lack of D-Pad and trigger support on modern gamepads. Our wrapper intercepts `joyGetPosEx` calls, queries `XInputGetState`, and feeds translated coordinate and button masks directly to the game.
 * **Capcom In-Game Polling (`0x0054dac7`)**: Unlike the prototype routine at `0x0043d460`, the active gameplay routine maps `Button 4` to LP, `Button 1` to MP, `Button 2` to HP, `Button 0` to LK, `Button 3` to MK, `Button 5` to HK, `Button 8` to Start (`0x800`), and `Button 9` to Coin (`0x100`).
 * **Frame-Skip Override**: Located at `0x0055ff18`, the engine dynamically altered `0x00bf5560` (frame delay) and `0x00bfe782` (skip factor) whenever timing exceeded 17ms. The wrapper continuously enforces full-rate rendering and clears the auto-skip flag (`*(WORD*)0x00bebf76 &= ~0x4000`).
