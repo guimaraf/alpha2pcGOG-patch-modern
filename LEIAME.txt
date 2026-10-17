@@ -81,10 +81,26 @@ B) VIA RIVATUNER STATISTICS SERVER (RTSS / MSI AFTERBURNER):
   inativo/desconectado (sem contaminacao de inputs ou ativacao acidental).
 
 --------------------------------------------------------------------------------
-6. PERSONALIZACAO (sfa2_patch.ini)
+6. MODO JANELA (ALT + ENTER) E TITULO MODERNIZADO
+--------------------------------------------------------------------------------
+- ALT + ENTER:
+  Pressione Alt + Enter a qualquer momento para alternar suavemente entre Tela
+  Cheia (Borderless Fullscreen) e Modo Janela com proporcao exata 4:3 (padrao: 960x720).
+  A janela possui barra de titulo e botoes normais de minimizar e fechar.
+- NOVO TITULO DO JOGO ("Street Fighter Alpha 2 PC"):
+  O antigo nome "Win SF Alpha2 Application" foi completamente substituido em:
+  * Barra de Titulo da Janela
+  * Barra de Tarefas e Menu Iniciar do Windows
+  * Controlador / Mixer de Volume do Windows (via integracao nativa WASAPI)
+
+--------------------------------------------------------------------------------
+7. PERSONALIZACAO (sfa2_patch.ini)
 --------------------------------------------------------------------------------
 Voce pode abrir o arquivo 'sfa2_patch.ini' em qualquer editor de texto:
 - Force60FPS = 1             : Trava o jogo a 60 FPS estritos sem pulos de quadro.
+- EnableAltEnter = 1         : Ativa o atalho Alt + Enter para alternar tela cheia/janela.
+- WindowedWidth = 960        : Largura da janela em modo janela (padrao: 960, 4:3).
+- WindowedHeight = 720       : Altura da janela em modo janela (padrao: 720, 4:3).
 - ContinuousBGMOnKO = 1      : Mantem a musica do cenario tocando continuamente sem
                                mute/pausa durante o 'K.O.!' e transicao de rounds (Arcade).
 - DuckBGMOnSuperKO = 1       : Ducking seletivo de volume ao terminar com Super Combo.
@@ -101,7 +117,7 @@ Voce pode abrir o arquivo 'sfa2_patch.ini' em qualquer editor de texto:
 - Deadzone = 7849            : Ajusta a sensibilidade da zona morta do analogico.
 
 --------------------------------------------------------------------------------
-7. DESINSTALACAO
+8. DESINSTALACAO
 --------------------------------------------------------------------------------
 Basta deletar os 4 arquivos (ddraw.dll, DDrawCompat.ini, dinput.dll, sfa2_patch.ini)
 da pasta do jogo. O jogo voltara ao estado original da GOG.

@@ -1,11 +1,23 @@
 #define WIN32_LEAN_AND_MEAN
+#define CINTERFACE
+#define COBJMACROS
 #include <windows.h>
 #include <mmsystem.h>
 #include <objbase.h>
+#include <mmdeviceapi.h>
+#include <audiopolicy.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+
+/* WASAPI GUIDs defined statically for standalone compilation without libuuid dependency */
+static const GUID MY_CLSID_MMDeviceEnumerator = 
+    { 0xbcde0395, 0xe52f, 0x467c, { 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e } };
+static const GUID MY_IID_IMMDeviceEnumerator = 
+    { 0xa95664d2, 0x9614, 0x4f35, { 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6 } };
+static const GUID MY_IID_IAudioSessionManager = 
+    { 0xbfa971f1, 0x4d37, 0x482e, { 0xa3, 0x4a, 0x32, 0xe4, 0x6b, 0x19, 0xe4, 0x56 } };
 
 /* XInput definitions */
 #define XINPUT_GAMEPAD_DPAD_UP          0x0001
@@ -87,6 +99,9 @@ static int g_cfgSwapTriggersBumpers = 0; /* 0: RB=HP, RT=HK. 1: RT=HP, RB=HK */
 static int g_cfgPlayer1Index = 0;      /* XInput Index for Player 1 */
 static int g_cfgPlayer2Index = 1;      /* XInput Index for Player 2 */
 static int g_cfgForce60FPS = 1;        /* Lock 60 FPS and disable engine frame skips */
+static int g_cfgEnableAltEnter = 1;    /* Allow Alt+Enter to toggle fullscreen / windowed */
+static int g_cfgWindowedWidth = 960;   /* Windowed width (4:3 aspect ratio) */
+static int g_cfgWindowedHeight = 720;  /* Windowed height (4:3 aspect ratio) */
 static int g_cfgContinuousBGMOnKO = 1; /* Keep BGM playing continuously on K.O. (Arcade CPS2 behavior) */
 static int g_cfgDuckBGMOnSuperKO = 1;  /* Duck BGM volume on Super KO finish */
 static int g_cfgSuperKOBGMVolumePercent = 30; /* Volume percentage on Super KO (default: 30%) */
@@ -120,6 +135,11 @@ static void LoadConfig(void) {
     g_cfgPlayer2Index = GetPrivateProfileIntA("Controllers", "Player2_Index", 1, iniPath);
 
     g_cfgForce60FPS = GetPrivateProfileIntA("Graphics", "Force60FPS", 1, iniPath);
+    g_cfgEnableAltEnter = GetPrivateProfileIntA("Graphics", "EnableAltEnter", 1, iniPath);
+    g_cfgWindowedWidth = GetPrivateProfileIntA("Graphics", "WindowedWidth", 960, iniPath);
+    if (g_cfgWindowedWidth < 320) g_cfgWindowedWidth = 320;
+    g_cfgWindowedHeight = GetPrivateProfileIntA("Graphics", "WindowedHeight", 720, iniPath);
+    if (g_cfgWindowedHeight < 240) g_cfgWindowedHeight = 240;
 
     g_cfgContinuousBGMOnKO = GetPrivateProfileIntA("Audio", "ContinuousBGMOnKO", 1, iniPath);
     g_cfgDuckBGMOnSuperKO = GetPrivateProfileIntA("Audio", "DuckBGMOnSuperKO", 1, iniPath);
@@ -133,9 +153,10 @@ static void LoadConfig(void) {
 
     g_cfgLogEnabled = GetPrivateProfileIntA("Debug", "EnableLog", 0, iniPath);
 
-    LogMsg("Config loaded: XInput=%d, Deadzone=%d, Macros=%d, SwapTB=%d, P1Index=%d, P2Index=%d, Force60FPS=%d, ContinuousBGM=%d, DuckSuper=%d, DuckVol=%d%%, FadeDur=%dms\n",
+    LogMsg("Config loaded: XInput=%d, Deadzone=%d, Macros=%d, SwapTB=%d, P1Index=%d, P2Index=%d, Force60FPS=%d, AltEnter=%d (%dx%d), ContinuousBGM=%d, DuckSuper=%d, DuckVol=%d%%, FadeDur=%dms\n",
            g_cfgXInputEnabled, g_cfgDeadzone, g_cfgEnableMacros, g_cfgSwapTriggersBumpers,
-           g_cfgPlayer1Index, g_cfgPlayer2Index, g_cfgForce60FPS, g_cfgContinuousBGMOnKO,
+           g_cfgPlayer1Index, g_cfgPlayer2Index, g_cfgForce60FPS, g_cfgEnableAltEnter,
+           g_cfgWindowedWidth, g_cfgWindowedHeight, g_cfgContinuousBGMOnKO,
            g_cfgDuckBGMOnSuperKO, g_cfgSuperKOBGMVolumePercent, g_cfgSuperKOFadeDurationMS);
 }
 
@@ -161,6 +182,165 @@ static void InitXInput(void) {
         }
     }
     LogMsg("Failed to load any XInput DLL\n");
+}
+
+/*
+ * Application Title & Audio Session Management:
+ * Renames "Win SF Alpha2 Application" to "Street Fighter Alpha 2 PC" across:
+ * 1. Executable memory strings (0x007e6b94 & 0x007e6bc0) used by CreateWindowExA.
+ * 2. Main Window title and Windows Taskbar (SetWindowTextA).
+ * 3. Windows Volume Mixer (WASAPI IAudioSessionControl::SetDisplayName).
+ */
+static void ApplyTitlePatches(void) {
+    const char newTitle[] = "Street Fighter Alpha 2 PC";
+    DWORD oldProtect;
+
+    /* 1. Fullscreen Window Name at 0x007e6b94 (28 bytes buffer in ALPHA2.EXE) */
+    char* pTitle1 = (char*)0x007e6b94;
+    if (VirtualProtect(pTitle1, 28, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        memset(pTitle1, 0, 28);
+        memcpy(pTitle1, newTitle, strlen(newTitle));
+        VirtualProtect(pTitle1, 28, oldProtect, &oldProtect);
+        LogMsg("Applied title patch at 0x007e6b94: '%s'\n", newTitle);
+    }
+
+    /* 2. Windowed Mode Window Name at 0x007e6bc0 (28 bytes buffer in ALPHA2.EXE) */
+    char* pTitle2 = (char*)0x007e6bc0;
+    if (VirtualProtect(pTitle2, 28, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        memset(pTitle2, 0, 28);
+        memcpy(pTitle2, newTitle, strlen(newTitle));
+        VirtualProtect(pTitle2, 28, oldProtect, &oldProtect);
+        LogMsg("Applied title patch at 0x007e6bc0: '%s'\n", newTitle);
+    }
+}
+
+static int UpdateAudioSessionDisplayName(const WCHAR* wszName) {
+    HRESULT hr;
+    IMMDeviceEnumerator* pEnum = NULL;
+    IMMDevice* pDevice = NULL;
+    IAudioSessionManager* pMgr = NULL;
+    IAudioSessionControl* pControl = NULL;
+    int success = 0;
+
+    CoInitialize(NULL);
+    hr = CoCreateInstance(&MY_CLSID_MMDeviceEnumerator, NULL, CLSCTX_INPROC_SERVER,
+                          &MY_IID_IMMDeviceEnumerator, (void**)&pEnum);
+    if (SUCCEEDED(hr) && pEnum) {
+        hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(pEnum, eRender, eMultimedia, &pDevice);
+        if (SUCCEEDED(hr) && pDevice) {
+            hr = IMMDevice_Activate(pDevice, &MY_IID_IAudioSessionManager, CLSCTX_INPROC_SERVER,
+                                    NULL, (void**)&pMgr);
+            if (SUCCEEDED(hr) && pMgr) {
+                hr = IAudioSessionManager_GetAudioSessionControl(pMgr, NULL, 0, &pControl);
+                if (SUCCEEDED(hr) && pControl) {
+                    hr = IAudioSessionControl_SetDisplayName(pControl, wszName, NULL);
+                    if (SUCCEEDED(hr)) {
+                        success = 1;
+                        LogMsg("Successfully updated Windows Volume Mixer session name to: %ls\n", wszName);
+                    }
+                    IAudioSessionControl_Release(pControl);
+                }
+                IAudioSessionManager_Release(pMgr);
+            }
+            IMMDevice_Release(pDevice);
+        }
+        IMMDeviceEnumerator_Release(pEnum);
+    }
+    return success;
+}
+
+/*
+ * Window Mode Toggle (Alt + Enter)
+ * Smoothly toggles between Borderless Fullscreen and Windowed mode with a 4:3 aspect ratio.
+ */
+static int g_bIsWindowed = 0;
+static DWORD g_lastToggleTick = 0;
+
+static void ToggleWindowedMode(void) {
+    DWORD now = timeGetTime();
+    if (now - g_lastToggleTick < 400) return; /* Debounce 400ms */
+    g_lastToggleTick = now;
+
+    HWND hWnd = *(HWND*)0x00bebf64;
+    if (!hWnd || !IsWindow(hWnd)) {
+        hWnd = FindWindowA("WinStzero2Class", NULL);
+    }
+    if (!hWnd || !IsWindow(hWnd)) return;
+
+    if (!g_bIsWindowed) {
+        /* Switch to Windowed Mode */
+        DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE;
+
+        RECT rc = { 0, 0, g_cfgWindowedWidth, g_cfgWindowedHeight };
+        AdjustWindowRect(&rc, style, FALSE);
+        int winW = rc.right - rc.left;
+        int winH = rc.bottom - rc.top;
+
+        HMONITOR hMon = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi;
+        ZeroMemory(&mi, sizeof(mi));
+        mi.cbSize = sizeof(mi);
+        GetMonitorInfoA(hMon, &mi);
+
+        int screenW = mi.rcWork.right - mi.rcWork.left;
+        int screenH = mi.rcWork.bottom - mi.rcWork.top;
+        int winX = mi.rcWork.left + (screenW - winW) / 2;
+        int winY = mi.rcWork.top + (screenH - winH) / 2;
+
+        SetWindowLongA(hWnd, GWL_STYLE, style);
+        SetWindowPos(hWnd, HWND_NOTOPMOST, winX, winY, winW, winH, 
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        ClipCursor(NULL);
+
+        /* Synchronize Capcom engine internal windowed flag */
+        volatile WORD* pEngineMode = (volatile WORD*)0x00bf00e8;
+        if (pEngineMode) *pEngineMode &= ~0x8000;
+
+        g_bIsWindowed = 1;
+        LogMsg("Switched to Windowed mode: %dx%d at (%d, %d)\n", winW, winH, winX, winY);
+    } else {
+        /* Switch back to Borderless Fullscreen */
+        DWORD style = WS_POPUP | WS_VISIBLE;
+
+        HMONITOR hMon = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi;
+        ZeroMemory(&mi, sizeof(mi));
+        mi.cbSize = sizeof(mi);
+        GetMonitorInfoA(hMon, &mi);
+
+        int scrX = mi.rcMonitor.left;
+        int scrY = mi.rcMonitor.top;
+        int scrW = mi.rcMonitor.right - mi.rcMonitor.left;
+        int scrH = mi.rcMonitor.bottom - mi.rcMonitor.top;
+
+        SetWindowLongA(hWnd, GWL_STYLE, style);
+        SetWindowPos(hWnd, HWND_TOP, scrX, scrY, scrW, scrH, 
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+        /* Synchronize Capcom engine internal fullscreen flag */
+        volatile WORD* pEngineMode = (volatile WORD*)0x00bf00e8;
+        if (pEngineMode) *pEngineMode |= 0x8000;
+
+        g_bIsWindowed = 0;
+        LogMsg("Switched to Fullscreen mode: %dx%d at (%d, %d)\n", scrW, scrH, scrX, scrY);
+    }
+
+    SetWindowTextA(hWnd, "Street Fighter Alpha 2 PC");
+}
+
+static WNDPROC g_pfnOrigWndProc = NULL;
+
+static LRESULT CALLBACK ModWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (g_cfgEnableAltEnter && (uMsg == WM_SYSKEYDOWN || uMsg == WM_SYSKEYUP) && wParam == VK_RETURN) {
+        if (uMsg == WM_SYSKEYDOWN) {
+            ToggleWindowedMode();
+        }
+        return 0; /* Consumed: avoids Windows default system beep */
+    }
+    if (g_pfnOrigWndProc) {
+        return CallWindowProcA(g_pfnOrigWndProc, hWnd, uMsg, wParam, lParam);
+    }
+    return DefWindowProcA(hWnd, uMsg, wParam, lParam);
 }
 
 /* DirectSound volume and buffer helpers */
@@ -366,6 +546,36 @@ MMRESULT WINAPI MyJoyGetPosEx(UINT uJoyID, LPJOYINFOEX pji) {
         *pFrameDelay   = 0x11;        /* 17ms frame delay = locked 60 FPS */
         *pQualityLevel = 0;           /* Full Quality 1/1 (no frame skip) */
         *pAutoSkipFlag &= ~0x4000;    /* Disable Auto Frame-Skip flag */
+    }
+
+    /* Initialize Window title, subclassing, and WASAPI Volume Mixer name once HWND is created */
+    static int s_windowInitialized = 0;
+    static int s_audioSessionAttempts = 0;
+    HWND hWnd = *(HWND*)0x00bebf64;
+    if (!hWnd || !IsWindow(hWnd)) {
+        hWnd = FindWindowA("WinStzero2Class", NULL);
+    }
+    if (hWnd && IsWindow(hWnd)) {
+        if (!s_windowInitialized) {
+            s_windowInitialized = 1;
+            SetWindowTextA(hWnd, "Street Fighter Alpha 2 PC");
+            g_pfnOrigWndProc = (WNDPROC)SetWindowLongPtrA(hWnd, GWLP_WNDPROC, (LONG_PTR)ModWndProc);
+            LogMsg("Window initialized and subclassed (HWND: %p). Title set to 'Street Fighter Alpha 2 PC'\n", hWnd);
+        }
+        if (s_audioSessionAttempts < 10) {
+            if (UpdateAudioSessionDisplayName(L"Street Fighter Alpha 2 PC")) {
+                s_audioSessionAttempts = 999;
+            } else {
+                s_audioSessionAttempts++;
+            }
+        }
+    }
+
+    /* Hotkey polling fallback for Alt + Enter */
+    if (g_cfgEnableAltEnter) {
+        if ((GetAsyncKeyState(VK_MENU) & 0x8000) && (GetAsyncKeyState(VK_RETURN) & 0x8000)) {
+            ToggleWindowedMode();
+        }
     }
 
     /* If XInput mod is disabled, pass through directly */
@@ -644,6 +854,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         DisableThreadLibraryCalls(hinstDLL);
         LoadConfig();
         LogMsg("SFA2 XInput & Modernization Mod loaded.\n");
+        ApplyTitlePatches();
         InitXInput();
         InstallIATHook();
         ApplyAudioPatches();

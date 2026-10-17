@@ -18,6 +18,14 @@ This patch enables smooth 60 FPS gameplay on Windows 10 and Windows 11, translat
   * Borderless fullscreen at your native desktop resolution without altering desktop settings.
   * Preserves the original **4:3 aspect ratio** with clean pixel-art point scaling and pillarboxing.
   * Flawless **Alt-Tab** task switching without crashing or screen distortion.
+* **Windowed & Fullscreen Toggle (`Alt + Enter`)**:
+  * Toggle smoothly between Borderless Fullscreen and Windowed mode at any time using the universal **`Alt + Enter`** shortcut.
+  * Windowed mode renders with an authentic **4:3 aspect ratio** (defaults to **960x720**, customizable in `sfa2_patch.ini`), featuring standard Windows caption bar and minimize controls.
+* **Modernized Title Across Windows (`Street Fighter Alpha 2 PC`)**:
+  * Completely eliminates Capcom's legacy 1998 placeholder `"Win SF Alpha2 Application"`:
+    * **Window Title Bar**: Displays `"Street Fighter Alpha 2 PC"`.
+    * **Windows Taskbar & Start Bar**: Properly displays `"Street Fighter Alpha 2 PC"`.
+    * **Windows Volume Mixer & Sound Settings**: Integrates with WASAPI (`IAudioSessionControl`) so the application volume slider is labeled `"Street Fighter Alpha 2 PC"`.
 * **Native XInput Controller Support (`dinput.dll` proxy)**:
   * Intercepts `joyGetPosEx` via memory IAT hooking with near-zero latency.
   * Full **D-Pad** support (unifies the digital pad with the left analog stick).
@@ -102,6 +110,13 @@ Edit `sfa2_patch.ini` with any text editor to customize your experience:
 ; Locks the engine to 60 FPS (17ms ticks) and disables Capcom's internal auto-frame-skip
 Force60FPS = 1
 
+; Enable Alt+Enter shortcut to toggle between Fullscreen and Windowed mode
+EnableAltEnter = 1
+
+; Windowed mode dimensions (standard 4:3 arcade aspect ratio)
+WindowedWidth = 960
+WindowedHeight = 720
+
 [Controllers]
 ; Windows XInput controller index for Player 1 (default: 0)
 Player1_Index = 0
@@ -159,7 +174,7 @@ The source code for the input wrapper is located in the [`src/`](src/) directory
 ### Build Command:
 Run [`src/build.bat`](src/build.bat) or compile manually:
 ```bash
-clang -target i686-w64-windows-gnu -shared -O2 -s src/dinput_xinput.c src/dinput.def -o dinput.dll -lwinmm -lm
+clang -target i686-w64-windows-gnu -shared -O2 -s src/dinput_xinput.c src/dinput.def -o dinput.dll -lwinmm -lm -lole32
 ```
 
 ---
