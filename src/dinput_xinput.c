@@ -251,29 +251,28 @@ static int UpdateAudioSessionDisplayName(const WCHAR* wszName) {
 }
 
 /*
+ * DirectDraw Palette Restoration Helper
+ * Forces Capcom's palette refresh routine (0x0054c404) to re-upload all 256 color
+ * entries to the IDirectDrawPalette object (0x009bf338) via SetEntries.
+ */
+static void ForcePaletteRestore(void) {
+    volatile BYTE* pPalDirty = (volatile BYTE*)0x00bec004;
+    if (pPalDirty) {
+        *pPalDirty |= 0x40;
+    }
+    typedef void (*PFN_RestorePalette)(void);
+    PFN_RestorePalette pfnRestore = (PFN_RestorePalette)0x0054c404;
+    if (pfnRestore) {
+        pfnRestore();
+    }
+}
+
+/*
  * Window Mode Toggle (Alt + Enter)
- * Seamlessly transitions between DirectDraw Borderless Fullscreen and Windowed mode with a 4:3 aspect ratio.
+ * Seamlessly transitions between DirectDraw Fullscreen and Windowed mode with a 4:3 aspect ratio.
  */
 static int g_bIsWindowed = 0;
 static DWORD g_lastToggleTick = 0;
-
-static void SyncWindowClientCoordinates(HWND hWnd) {
-    RECT rcClient;
-    if (GetClientRect(hWnd, &rcClient)) {
-        POINT ptTL = { rcClient.left, rcClient.top };
-        POINT ptBR = { rcClient.right, rcClient.bottom };
-        ClientToScreen(hWnd, &ptTL);
-        ClientToScreen(hWnd, &ptBR);
-        *(LONG*)0x00bebdb0 = ptTL.x;
-        *(LONG*)0x00bebdb4 = ptTL.y;
-        *(LONG*)0x00bebdb8 = ptBR.x;
-        *(LONG*)0x00bebdbc = ptBR.y;
-
-        typedef void (*PFN_CapcomClipperUpdate)(void);
-        PFN_CapcomClipperUpdate pfnUpdate = (PFN_CapcomClipperUpdate)0x0043ec60;
-        if (pfnUpdate) pfnUpdate();
-    }
-}
 
 static void ToggleWindowedMode(void) {
     DWORD now = timeGetTime();
@@ -287,29 +286,15 @@ static void ToggleWindowedMode(void) {
     if (!hWnd || !IsWindow(hWnd)) return;
 
     volatile WORD* pEngineMode = (volatile WORD*)0x00bf00e8;
-    int isCurrentlyFullscreen = pEngineMode ? ((*pEngineMode & 0x8000) != 0) : (!g_bIsWindowed);
-
     IDirectDraw* pDD = *(IDirectDraw**)0x00bf00e4;
     IDirectDrawSurface* pPrimary = *(IDirectDrawSurface**)0x00bf0040;
+
+    int isCurrentlyFullscreen = !g_bIsWindowed;
 
     if (isCurrentlyFullscreen) {
         /*
          * ETAPA A: Transicao de Tela Cheia -> Modo Janela
          */
-
-        /* 1. Desengatar a Configuracao de Tela Cheia do DirectDraw */
-        if (pDD && (DWORD)pDD >= 0x10000) {
-            IDirectDraw_RestoreDisplayMode(pDD);
-            IDirectDraw_SetCooperativeLevel(pDD, hWnd, DDSCL_NORMAL);
-            LogMsg("DirectDraw cooperative level set to DDSCL_NORMAL\n");
-        }
-
-        /* 2. Atualizar a Flag Interna da Capcom */
-        if (pEngineMode) {
-            *pEngineMode &= ~0x8000;
-        }
-
-        /* 3. Alterar o Estilo da Janela e Redimensionar */
         DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE;
 
         RECT rc = { 0, 0, g_cfgWindowedWidth, g_cfgWindowedHeight };
@@ -334,24 +319,28 @@ static void ToggleWindowedMode(void) {
         ClipCursor(NULL);
         ShowCursor(TRUE);
 
-        /* 4. Adaptar Clipper e Superficies */
-        if (pPrimary && (DWORD)pPrimary >= 0x10000 && pDD && (DWORD)pDD >= 0x10000) {
-            IDirectDrawClipper* pClipper = NULL;
-            IDirectDrawSurface_GetClipper(pPrimary, &pClipper);
-            if (!pClipper) {
-                if (SUCCEEDED(IDirectDraw_CreateClipper(pDD, 0, &pClipper, NULL)) && pClipper) {
-                    IDirectDrawClipper_SetHWnd(pClipper, 0, hWnd);
-                    IDirectDrawSurface_SetClipper(pPrimary, pClipper);
-                    *(void**)0x00bebf70 = pClipper;
-                    LogMsg("Created and attached IDirectDrawClipper to Primary Surface\n");
-                }
-            } else {
-                IDirectDrawClipper_SetHWnd(pClipper, 0, hWnd);
-                IDirectDrawClipper_Release(pClipper);
-            }
+        /*
+         * CRUCIAL: Manter o bit 0x8000 da engine Capcom ativado!
+         * Se 0x8000 for limpo, o motor desvia em 0x0054c1f1 para o ramo de software Blt
+         * em 0x0054c2f4, que falha com pilha nao inicializada gerando tela preta.
+         * Com 0x8000 ativo, a Capcom continua chamando pPrimary->Flip() a cada frame,
+         * o qual e interceptado e apresentado na area cliente da janela pelo DDrawCompat.
+         * NUNCA crie nem anexe IDirectDrawClipper a superficie com DDSCAPS_FLIP.
+         */
+        if (pEngineMode) {
+            *pEngineMode |= 0x8000;
         }
 
-        SyncWindowClientCoordinates(hWnd);
+        /* Notificar o DirectDraw / DDrawCompat da mudanca para janela nativa */
+        if (pDD && (DWORD)pDD >= 0x10000) {
+            IDirectDraw_RestoreDisplayMode(pDD);
+            IDirectDraw_SetCooperativeLevel(pDD, hWnd, DDSCL_NORMAL);
+            LogMsg("DirectDraw cooperative level set to DDSCL_NORMAL\n");
+        }
+
+        /* Sincronizar paleta de 256 cores para o modo janela */
+        ForcePaletteRestore();
+
         g_bIsWindowed = 1;
         LogMsg("Switched to Windowed mode: %dx%d (client %dx%d) at (%d, %d)\n",
                winW, winH, g_cfgWindowedWidth, g_cfgWindowedHeight, winX, winY);
@@ -359,8 +348,6 @@ static void ToggleWindowedMode(void) {
         /*
          * ETAPA B: Transicao de Modo Janela -> Tela Cheia
          */
-
-        /* 1. Restaurar a Configuracao Padrao de Tela Cheia (Borderless Fullscreen) */
         DWORD style = WS_POPUP | WS_VISIBLE;
 
         HMONITOR hMon = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
@@ -379,23 +366,21 @@ static void ToggleWindowedMode(void) {
                      SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         ShowCursor(FALSE);
 
-        /* 2. Atualizar a Flag Interna da Capcom */
         if (pEngineMode) {
             *pEngineMode |= 0x8000;
         }
 
-        /* 3. Reativar a Exclusividade do DirectDraw */
         if (pDD && (DWORD)pDD >= 0x10000) {
             IDirectDraw_SetCooperativeLevel(pDD, hWnd, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN | DDSCL_ALLOWREBOOT);
             LogMsg("DirectDraw cooperative level set to DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN\n");
         }
 
-        /* 4. Restaurar Superficies de Renderizacao */
         if (pPrimary && (DWORD)pPrimary >= 0x10000) {
             IDirectDrawSurface_Restore(pPrimary);
         }
 
-        SyncWindowClientCoordinates(hWnd);
+        ForcePaletteRestore();
+
         g_bIsWindowed = 0;
         LogMsg("Switched to Fullscreen mode: %dx%d at (%d, %d)\n", scrW, scrH, scrX, scrY);
     }
@@ -413,9 +398,34 @@ static LRESULT CALLBACK ModWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
         return 0; /* Consumed: avoids Windows default system beep */
     }
 
-    /* Keep Capcom client rectangle synchronized when window moves or resizes in windowed mode */
-    if (g_bIsWindowed && (uMsg == WM_MOVE || uMsg == WM_SIZE || uMsg == WM_EXITSIZEMOVE)) {
-        SyncWindowClientCoordinates(hWnd);
+    /* Intercept Capcom native F4 hotkey to avoid calling broken native toggle 0x00554479 */
+    if (uMsg == WM_KEYDOWN && wParam == VK_F4) {
+        if (g_cfgEnableAltEnter) {
+            ToggleWindowedMode();
+        }
+        return 0;
+    }
+
+    /*
+     * Palette & Focus Management:
+     * Prevent Alt+Tab from corrupting colors or leaving rainbow VGA palette.
+     */
+    if (uMsg == WM_ACTIVATEAPP) {
+        if (wParam) {
+            /* App regained focus (Alt+Tab in): restore palette and primary surface */
+            ForcePaletteRestore();
+            IDirectDrawSurface* pPrimary = *(IDirectDrawSurface**)0x00bf0040;
+            if (pPrimary && (DWORD)pPrimary >= 0x10000) {
+                IDirectDrawSurface_Restore(pPrimary);
+            }
+        }
+    } else if (uMsg == WM_ACTIVATE) {
+        if (LOWORD(wParam) != WA_INACTIVE) {
+            ForcePaletteRestore();
+        }
+    } else if (uMsg == WM_QUERYNEWPALETTE || uMsg == WM_PALETTECHANGED) {
+        ForcePaletteRestore();
+        return (uMsg == WM_QUERYNEWPALETTE) ? TRUE : 0;
     }
 
     if (g_pfnOrigWndProc) {
@@ -641,6 +651,7 @@ MMRESULT WINAPI MyJoyGetPosEx(UINT uJoyID, LPJOYINFOEX pji) {
             s_windowInitialized = 1;
             SetWindowTextA(hWnd, "Street Fighter Alpha 2 PC");
             g_pfnOrigWndProc = (WNDPROC)SetWindowLongPtrA(hWnd, GWLP_WNDPROC, (LONG_PTR)ModWndProc);
+            ForcePaletteRestore();
             LogMsg("Window initialized and subclassed (HWND: %p). Title set to 'Street Fighter Alpha 2 PC'\n", hWnd);
         }
         if (s_audioSessionAttempts < 10) {
@@ -881,6 +892,31 @@ HRESULT WINAPI DirectInputCreateEx(HINSTANCE hinst, DWORD dwVersion, REFIID riid
 }
 
 /*
+ * Apply Palette Patches:
+ * Neutralizes Capcom's legacy Windows 95 GDI palette destruction function at 0x0055fe0c.
+ *
+ * Technical details:
+ * When losing focus (Alt+Tab), Capcom's WndProc (0x0055f7e2) calls 0x0055fe0c, which executes
+ * SetSystemPaletteUse(hdc, SYSPAL_STATIC), CreatePalette, and RealizePalette. This overwrites
+ * the 256-color arcade palette with the 20-color Windows 95 VGA static palette, resulting
+ * in corrupted rainbow colors upon returning to the game.
+ *
+ * Patching 0x0055fe0c entry with RET (0xC3) completely neutralizes this behavior, preserving
+ * the full 256-color DirectDraw palette in memory across Alt+Tab cycles.
+ */
+static void ApplyPalettePatches(void) {
+    DWORD oldProtect;
+    BYTE* pLegacyPalFunc = (BYTE*)0x0055fe0c;
+    if (VirtualProtect(pLegacyPalFunc, 1, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        *pLegacyPalFunc = 0xC3; /* ret */
+        VirtualProtect(pLegacyPalFunc, 1, oldProtect, &oldProtect);
+        LogMsg("Applied palette patch: neutralized legacy GDI palette at 0x0055fe0c (RET)\n");
+    } else {
+        LogMsg("Failed to patch legacy GDI palette at 0x0055fe0c\n");
+    }
+}
+
+/*
  * Apply Audio Patches for Continuous BGM on K.O. (Arcade CPS2 behavior)
  *
  * Technical details:
@@ -936,6 +972,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         LoadConfig();
         LogMsg("SFA2 XInput & Modernization Mod loaded.\n");
         ApplyTitlePatches();
+        ApplyPalettePatches();
         InitXInput();
         InstallIATHook();
         ApplyAudioPatches();
