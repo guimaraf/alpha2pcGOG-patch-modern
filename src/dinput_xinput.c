@@ -100,9 +100,6 @@ static int g_cfgSwapTriggersBumpers = 0; /* 0: RB=HP, RT=HK. 1: RT=HP, RB=HK */
 static int g_cfgPlayer1Index = 0;      /* XInput Index for Player 1 */
 static int g_cfgPlayer2Index = 1;      /* XInput Index for Player 2 */
 static int g_cfgForce60FPS = 1;        /* Lock 60 FPS and disable engine frame skips */
-static int g_cfgEnableAltEnter = 1;    /* Allow Alt+Enter to toggle fullscreen / windowed */
-static int g_cfgWindowedWidth = 960;   /* Windowed width (4:3 aspect ratio) */
-static int g_cfgWindowedHeight = 720;  /* Windowed height (4:3 aspect ratio) */
 static int g_cfgContinuousBGMOnKO = 1; /* Keep BGM playing continuously on K.O. (Arcade CPS2 behavior) */
 static int g_cfgDuckBGMOnSuperKO = 1;  /* Duck BGM volume on Super KO finish */
 static int g_cfgSuperKOBGMVolumePercent = 30; /* Volume percentage on Super KO (default: 30%) */
@@ -136,11 +133,6 @@ static void LoadConfig(void) {
     g_cfgPlayer2Index = GetPrivateProfileIntA("Controllers", "Player2_Index", 1, iniPath);
 
     g_cfgForce60FPS = GetPrivateProfileIntA("Graphics", "Force60FPS", 1, iniPath);
-    g_cfgEnableAltEnter = GetPrivateProfileIntA("Graphics", "EnableAltEnter", 1, iniPath);
-    g_cfgWindowedWidth = GetPrivateProfileIntA("Graphics", "WindowedWidth", 960, iniPath);
-    if (g_cfgWindowedWidth < 320) g_cfgWindowedWidth = 320;
-    g_cfgWindowedHeight = GetPrivateProfileIntA("Graphics", "WindowedHeight", 720, iniPath);
-    if (g_cfgWindowedHeight < 240) g_cfgWindowedHeight = 240;
 
     g_cfgContinuousBGMOnKO = GetPrivateProfileIntA("Audio", "ContinuousBGMOnKO", 1, iniPath);
     g_cfgDuckBGMOnSuperKO = GetPrivateProfileIntA("Audio", "DuckBGMOnSuperKO", 1, iniPath);
@@ -154,10 +146,9 @@ static void LoadConfig(void) {
 
     g_cfgLogEnabled = GetPrivateProfileIntA("Debug", "EnableLog", 0, iniPath);
 
-    LogMsg("Config loaded: XInput=%d, Deadzone=%d, Macros=%d, SwapTB=%d, P1Index=%d, P2Index=%d, Force60FPS=%d, AltEnter=%d (%dx%d), ContinuousBGM=%d, DuckSuper=%d, DuckVol=%d%%, FadeDur=%dms\n",
+    LogMsg("Config loaded: XInput=%d, Deadzone=%d, Macros=%d, SwapTB=%d, P1Index=%d, P2Index=%d, Force60FPS=%d, ContinuousBGM=%d, DuckSuper=%d, DuckVol=%d%%, FadeDur=%dms\n",
            g_cfgXInputEnabled, g_cfgDeadzone, g_cfgEnableMacros, g_cfgSwapTriggersBumpers,
-           g_cfgPlayer1Index, g_cfgPlayer2Index, g_cfgForce60FPS, g_cfgEnableAltEnter,
-           g_cfgWindowedWidth, g_cfgWindowedHeight, g_cfgContinuousBGMOnKO,
+           g_cfgPlayer1Index, g_cfgPlayer2Index, g_cfgForce60FPS, g_cfgContinuousBGMOnKO,
            g_cfgDuckBGMOnSuperKO, g_cfgSuperKOBGMVolumePercent, g_cfgSuperKOFadeDurationMS);
 }
 
@@ -267,142 +258,16 @@ static void ForcePaletteRestore(void) {
     }
 }
 
-/*
- * Window Mode Toggle (Alt + Enter)
- * Seamlessly transitions between DirectDraw Fullscreen and Windowed mode with a 4:3 aspect ratio.
- */
-static int g_bIsWindowed = 0;
-static DWORD g_lastToggleTick = 0;
-
-static void ToggleWindowedMode(void) {
-    DWORD now = timeGetTime();
-    if (now - g_lastToggleTick < 500) return; /* Debounce 500ms */
-    g_lastToggleTick = now;
-
-    HWND hWnd = *(HWND*)0x00bebf64;
-    if (!hWnd || !IsWindow(hWnd)) {
-        hWnd = FindWindowA("WinStzero2Class", NULL);
-    }
-    if (!hWnd || !IsWindow(hWnd)) return;
-
-    volatile WORD* pEngineMode = (volatile WORD*)0x00bf00e8;
-    IDirectDraw* pDD = *(IDirectDraw**)0x00bf00e4;
-    IDirectDrawSurface* pPrimary = *(IDirectDrawSurface**)0x00bf0040;
-
-    int isCurrentlyFullscreen = !g_bIsWindowed;
-
-    if (isCurrentlyFullscreen) {
-        /*
-         * ETAPA A: Transicao de Tela Cheia -> Modo Janela
-         */
-        DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE;
-
-        RECT rc = { 0, 0, g_cfgWindowedWidth, g_cfgWindowedHeight };
-        AdjustWindowRect(&rc, style, FALSE);
-        int winW = rc.right - rc.left;
-        int winH = rc.bottom - rc.top;
-
-        HMONITOR hMon = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
-        MONITORINFO mi;
-        ZeroMemory(&mi, sizeof(mi));
-        mi.cbSize = sizeof(mi);
-        GetMonitorInfoA(hMon, &mi);
-
-        int screenW = mi.rcWork.right - mi.rcWork.left;
-        int screenH = mi.rcWork.bottom - mi.rcWork.top;
-        int winX = mi.rcWork.left + (screenW - winW) / 2;
-        int winY = mi.rcWork.top + (screenH - winH) / 2;
-
-        SetWindowLongA(hWnd, GWL_STYLE, style);
-        SetWindowPos(hWnd, HWND_NOTOPMOST, winX, winY, winW, winH, 
-                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-        ClipCursor(NULL);
-        ShowCursor(TRUE);
-
-        /*
-         * CRUCIAL: Manter o bit 0x8000 da engine Capcom ativado!
-         * Se 0x8000 for limpo, o motor desvia em 0x0054c1f1 para o ramo de software Blt
-         * em 0x0054c2f4, que falha com pilha nao inicializada gerando tela preta.
-         * Com 0x8000 ativo, a Capcom continua chamando pPrimary->Flip() a cada frame,
-         * o qual e interceptado e apresentado na area cliente da janela pelo DDrawCompat.
-         * NUNCA crie nem anexe IDirectDrawClipper a superficie com DDSCAPS_FLIP.
-         */
-        if (pEngineMode) {
-            *pEngineMode |= 0x8000;
-        }
-
-        /* Notificar o DirectDraw / DDrawCompat da mudanca para janela nativa */
-        if (pDD && (DWORD)pDD >= 0x10000) {
-            IDirectDraw_RestoreDisplayMode(pDD);
-            IDirectDraw_SetCooperativeLevel(pDD, hWnd, DDSCL_NORMAL);
-            LogMsg("DirectDraw cooperative level set to DDSCL_NORMAL\n");
-        }
-
-        /* Sincronizar paleta de 256 cores para o modo janela */
-        ForcePaletteRestore();
-
-        g_bIsWindowed = 1;
-        LogMsg("Switched to Windowed mode: %dx%d (client %dx%d) at (%d, %d)\n",
-               winW, winH, g_cfgWindowedWidth, g_cfgWindowedHeight, winX, winY);
-    } else {
-        /*
-         * ETAPA B: Transicao de Modo Janela -> Tela Cheia
-         */
-        DWORD style = WS_POPUP | WS_VISIBLE;
-
-        HMONITOR hMon = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
-        MONITORINFO mi;
-        ZeroMemory(&mi, sizeof(mi));
-        mi.cbSize = sizeof(mi);
-        GetMonitorInfoA(hMon, &mi);
-
-        int scrX = mi.rcMonitor.left;
-        int scrY = mi.rcMonitor.top;
-        int scrW = mi.rcMonitor.right - mi.rcMonitor.left;
-        int scrH = mi.rcMonitor.bottom - mi.rcMonitor.top;
-
-        SetWindowLongA(hWnd, GWL_STYLE, style);
-        SetWindowPos(hWnd, HWND_TOP, scrX, scrY, scrW, scrH, 
-                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-        ShowCursor(FALSE);
-
-        if (pEngineMode) {
-            *pEngineMode |= 0x8000;
-        }
-
-        if (pDD && (DWORD)pDD >= 0x10000) {
-            IDirectDraw_SetCooperativeLevel(pDD, hWnd, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN | DDSCL_ALLOWREBOOT);
-            LogMsg("DirectDraw cooperative level set to DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN\n");
-        }
-
-        if (pPrimary && (DWORD)pPrimary >= 0x10000) {
-            IDirectDrawSurface_Restore(pPrimary);
-        }
-
-        ForcePaletteRestore();
-
-        g_bIsWindowed = 0;
-        LogMsg("Switched to Fullscreen mode: %dx%d at (%d, %d)\n", scrW, scrH, scrX, scrY);
-    }
-
-    SetWindowTextA(hWnd, "Street Fighter Alpha 2 PC");
-}
-
 static WNDPROC g_pfnOrigWndProc = NULL;
 
 static LRESULT CALLBACK ModWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    if (g_cfgEnableAltEnter && (uMsg == WM_SYSKEYDOWN || uMsg == WM_SYSKEYUP) && wParam == VK_RETURN) {
-        if (uMsg == WM_SYSKEYDOWN) {
-            ToggleWindowedMode();
-        }
-        return 0; /* Consumed: avoids Windows default system beep */
+    /* Block Alt + Enter to enforce Fullscreen and prevent unwanted window state toggles */
+    if ((uMsg == WM_SYSKEYDOWN || uMsg == WM_SYSKEYUP) && wParam == VK_RETURN) {
+        return 0; /* Consumed: prevents default Windows beep or state change */
     }
 
     /* Intercept Capcom native F4 hotkey to avoid calling broken native toggle 0x00554479 */
     if (uMsg == WM_KEYDOWN && wParam == VK_F4) {
-        if (g_cfgEnableAltEnter) {
-            ToggleWindowedMode();
-        }
         return 0;
     }
 
@@ -663,12 +528,6 @@ MMRESULT WINAPI MyJoyGetPosEx(UINT uJoyID, LPJOYINFOEX pji) {
         }
     }
 
-    /* Hotkey polling fallback for Alt + Enter */
-    if (g_cfgEnableAltEnter) {
-        if ((GetAsyncKeyState(VK_MENU) & 0x8000) && (GetAsyncKeyState(VK_RETURN) & 0x8000)) {
-            ToggleWindowedMode();
-        }
-    }
 
     /* If XInput mod is disabled, pass through directly */
     if (!g_cfgXInputEnabled || !g_pfnXInputGetState) {
