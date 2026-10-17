@@ -1,0 +1,158 @@
+# Street Fighter Alpha 2 (PC / GOG, 1998) - Modernization & XInput Patch
+
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg)](https://www.microsoft.com/windows)
+[![Compatibility](https://img.shields.io/badge/Release-GOG%20Classic-green.svg)](https://www.gog.com/)
+[![Graphics](https://img.shields.io/badge/Renderer-Direct3D%2011-orange.svg)](#graphics-and-display)
+[![Input](https://img.shields.io/badge/Input-Native%20XInput-purple.svg)](#controller-and-input-mapping)
+
+A complete, zero-configuration modernization patch for the **1998 PC release of Street Fighter Alpha 2** (GOG version). 
+
+This patch enables smooth 60 FPS gameplay on Windows 10 and Windows 11, translates legacy DirectDraw 3 graphics to Direct3D 11 with pixel-perfect 4:3 scaling, adds native XInput gamepad support with authentic Capcom 6-button arcade layouts, and bypasses the engine's legacy auto-frame-skipping logic.
+
+---
+
+## Features
+
+* **Direct3D 11 Graphics Pipeline (DDrawCompat v0.7.2)**:
+  * Eliminates the severe 1–15 FPS software emulation lag caused by modern WDDM drivers on Windows 10 and 11.
+  * Borderless fullscreen at your native desktop resolution without altering desktop settings.
+  * Preserves the original **4:3 aspect ratio** with clean pixel-art point scaling and pillarboxing.
+  * Flawless **Alt-Tab** task switching without crashing or screen distortion.
+* **Native XInput Controller Support (`dinput.dll` proxy)**:
+  * Intercepts `joyGetPosEx` via memory IAT hooking with near-zero latency.
+  * Full **D-Pad** support (unifies the digital pad with the left analog stick).
+  * Independent analog triggers (fixes the legacy Z-axis trigger-canceling bug).
+  * Out-of-the-box support for Xbox, 8BitDo (M30, Pro 2, Ultimate), DualShock/DualSense (via DS4Windows/Steam), and generic XInput devices.
+  * **Strict 2-Player Controller Isolation**: Controller Index 0 is exclusively assigned to Player 1, and Index 1 to Player 2. When only one controller is plugged in, Player 2 is kept completely disconnected—preventing phantom inputs or accidental 2P challenger starts.
+* **Locked 60 FPS & Frame-Skip Bypass**:
+  * Overrides Capcom's legacy Pentium II "Auto Frame-Skip" mechanism in memory, preventing the engine from dynamically dropping down to 30, 20, or 15 FPS.
+  * Synchronizes presentation with the desktop window manager (DWM) for stutter-free frame pacing.
+* **Non-Destructive Drop-in Installation**:
+  * Modifies **zero bytes** of the original `ALPHA2.EXE` executable. Fully reversible at any time.
+
+---
+
+## Installation (GOG Version)
+
+1. Download or clone this repository.
+2. Copy the following files directly into your **Street Fighter Alpha 2** game installation directory (where `ALPHA2.EXE` is located):
+   * `ddraw.dll`
+   * `DDrawCompat.ini`
+   * `dinput.dll`
+   * `sfa2_patch.ini`
+3. Launch the game normally via the GOG shortcut or by executing `ALPHA2.EXE`.
+
+To uninstall, simply delete those 4 files.
+
+---
+
+## Controller & Input Mapping
+
+The input wrapper maps modern gamepads to Capcom's CPS2 arcade layout:
+
+| Controller Button (Xbox / 8BitDo M30) | Street Fighter Action | In-Engine Bitmask |
+| :--- | :--- | :--- |
+| **D-Pad / Left Stick** | Movement (Left, Right, Up, Down) | Directions |
+| **X Button** | **Light Punch (LP)** | `Button 4` |
+| **Y Button** | **Medium Punch (MP)** | `Button 1` |
+| **RB (or Z button on M30)** | **Heavy Punch (HP)** | `Button 2` |
+| **A Button** | **Light Kick (LK)** | `Button 0` |
+| **B Button** | **Medium Kick (MK)** | `Button 3` |
+| **RT (or C button on M30)** | **Heavy Kick (HK)** | `Button 5` |
+| **LB (or L button on M30)** | **Triple Punch Macro** (LP + MP + HP) | `1 << 4 \| 1 << 1 \| 1 << 2` |
+| **LT** | **Triple Kick Macro** (LK + MK + HK) | `1 << 0 \| 1 << 3 \| 1 << 5` |
+| **START / Menu** | **Start** | `Button 8 (0x800)` |
+| **BACK / View / Minus** | **Coin / Select** | `Button 9 (0x100)` |
+
+*Note on 6-Button Pads (e.g., 8BitDo M30 2.4G / Bluetooth)*: When set to XInput mode, the top row (`X`, `Y`, `Z`) immediately acts as LP, MP, HP, and the bottom row (`A`, `B`, `C`) acts as LK, MK, HK.
+
+---
+
+## Frame Rate Monitoring & RivaTuner (RTSS)
+
+You can monitor in-game performance using either the built-in OSD or RivaTuner Statistics Server:
+
+### Option A: Built-in DDrawCompat Overlay (No External Tools)
+* Press **`Shift + F12`** at any time during gameplay to toggle the native FPS, frametime, and rendering queue overlay.
+* Press **`Shift + F11`** to open the real-time graphic settings overlay.
+
+### Option B: RivaTuner Statistics Server (RTSS / MSI Afterburner)
+Because `ALPHA2.EXE` is a legacy 1998 binary and Direct3D 11 is loaded dynamically via the wrapper, RTSS with default settings may not automatically inject.
+1. Open **RivaTuner Statistics Server (RTSS)**.
+2. Click the green **`+` (Add)** button in the lower-left corner.
+3. Select `ALPHA2.EXE` from your game folder.
+4. In the profile settings for `ALPHA2.EXE`:
+   * Set **Application detection level** to **High**.
+   * Ensure **Show On-Screen Display** is set to **ON**.
+5. Launch the game; the RTSS overlay will appear with your configured framerate and hardware metrics.
+
+---
+
+## Configuration (`sfa2_patch.ini`)
+
+Edit `sfa2_patch.ini` with any text editor to customize your experience:
+
+```ini
+[Graphics]
+; Locks the engine to 60 FPS (17ms ticks) and disables Capcom's internal auto-frame-skip
+Force60FPS = 1
+
+[Controllers]
+; Windows XInput controller index for Player 1 (default: 0)
+Player1_Index = 0
+
+; Windows XInput controller index for Player 2 (default: 1)
+; Kept disconnected when only 1 controller is connected
+Player2_Index = 1
+
+[XInput]
+; Enable native XInput hook (1 = Enabled, 0 = Disabled)
+Enabled = 1
+
+; Analog stick deadzone (range: 0 to 32767, default: 7849)
+Deadzone = 7849
+
+; Enable Triple Punch (LB) and Triple Kick (LT) macros (1 = Yes, 0 = No)
+EnableMacros = 1
+
+; Swap heavy attack buttons between bumpers and triggers:
+; 0 = Default (RB = Heavy Punch, RT = Heavy Kick)
+; 1 = Swapped (RT = Heavy Punch, RB = Heavy Kick)
+SwapTriggersBumpers = 0
+
+[Debug]
+; Write diagnostic info to sfa2_patch.log (1 = Enabled, 0 = Disabled)
+EnableLog = 0
+```
+
+---
+
+## Building from Source
+
+The source code for the input wrapper is located in the [`src/`](src/) directory.
+
+### Requirements:
+* Clang or GCC targeting 32-bit Windows (`i686-w64-windows-gnu`).
+* Windows SDK headers (`windows.h`, `mmsystem.h`, `objbase.h`).
+
+### Build Command:
+Run [`src/build.bat`](src/build.bat) or compile manually:
+```bash
+clang -target i686-w64-windows-gnu -shared -O2 -s src/dinput_xinput.c src/dinput.def -o dinput.dll -lwinmm
+```
+
+---
+
+## Technical Architecture & Reversing Notes
+
+* **WinMM Hooking**: `ALPHA2.EXE` imports `joyGetPosEx` from `WINMM.dll` with an IAT entry at `0x00cb0684`. The game never queries `JOY_RETURNPOV` or `JOY_RETURNZ`, which caused the lack of D-Pad and trigger support on modern gamepads. Our wrapper intercepts `joyGetPosEx` calls, queries `XInputGetState`, and feeds translated coordinate and button masks directly to the game.
+* **Capcom In-Game Polling (`0x0054dac7`)**: Unlike the prototype routine at `0x0043d460`, the active gameplay routine maps `Button 4` to LP, `Button 1` to MP, `Button 2` to HP, `Button 0` to LK, `Button 3` to MK, `Button 5` to HK, `Button 8` to Start (`0x800`), and `Button 9` to Coin (`0x100`).
+* **Frame-Skip Override**: Located at `0x0055ff18`, the engine dynamically altered `0x00bf5560` (frame delay) and `0x00bfe782` (skip factor) whenever timing exceeded 17ms. The wrapper continuously enforces full-rate rendering and clears the auto-skip flag (`*(WORD*)0x00bebf76 &= ~0x4000`).
+
+---
+
+## Credits & License
+
+* **DDrawCompat**: Developed by [narzoul](https://github.com/narzoul/DDrawCompat) (BSD License).
+* **XInput Wrapper & Modernization**: Developed for the Street Fighter community.
+* **Street Fighter Alpha 2**: © Capcom Co., Ltd. This patch contains no copyrighted game assets or proprietary binaries from Capcom.

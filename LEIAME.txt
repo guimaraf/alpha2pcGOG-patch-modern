@@ -1,0 +1,99 @@
+================================================================================
+STREET FIGHTER ALPHA 2 (PC / GOG, 1998) - MODERN WINDOWS & XINPUT FIX
+================================================================================
+
+Este patch moderniza a versao PC do Street Fighter Alpha 2 da GOG para rodar com
+alta performance e estabilidade no Windows 10 e Windows 11, adicionando suporte
+nativo a controles modernos (XInput / Xbox / 8BitDo M30 / DualShock / DualSense)
+e renderizacao em Direct3D 11.
+
+--------------------------------------------------------------------------------
+1. CONTEUDO DO PATCH
+--------------------------------------------------------------------------------
+- ddraw.dll          : Wrapper DirectDraw 3 -> Direct3D 11 (DDrawCompat v0.7.2).
+- DDrawCompat.ini    : Configuracao grafica (resolucao da area de trabalho, tela
+                       cheia sem bordas, proporcao 4:3 com pixel art nitido,
+                       correcao total de Alt-Tab e OSD nativo de estatisticas).
+- dinput.dll         : Proxy Win32 de DirectInput + Hook de joyGetPosEx para XInput
+                       + Trava de 60 FPS estrito (desativa auto frame-skip).
+- sfa2_patch.ini     : Configuracoes de controle e video (indices P1/P2, 60 FPS).
+- src/               : Codigo-fonte completo em C e script de compilacao.
+
+--------------------------------------------------------------------------------
+2. COMO INSTALAR NA SUA COPIA DA GOG
+--------------------------------------------------------------------------------
+1. Copie os seguintes arquivos da pasta 'patch' diretamente para a pasta raiz onde
+   o jogo esta instalado (onde se encontra o ALPHA2.EXE):
+     - ddraw.dll
+     - DDrawCompat.ini
+     - dinput.dll
+     - sfa2_patch.ini
+2. Execute o jogo normalmente pelo atalho da GOG ou pelo ALPHA2.EXE.
+3. Nao e necessario substituir nem modificar o executavel original.
+
+--------------------------------------------------------------------------------
+3. COMO MONITORAR FPS E ESTATISTICAS
+--------------------------------------------------------------------------------
+Existem duas formas de ver o FPS do jogo em tempo real:
+
+A) OVERLAY NATIVO DO DDRAWCOMPAT (Sem programas externos):
+   - Durante o jogo, pressione SHIFT + F12 no teclado a qualquer momento.
+   - Um contador exibira a taxa de quadros (FPS), frametime e tempo de renderizacao.
+   - Pressione SHIFT + F11 para abrir o menu completo de ajustes graficos in-game.
+
+B) VIA RIVATUNER STATISTICS SERVER (RTSS / MSI AFTERBURNER):
+   Como o ALPHA2.EXE e um executavel antigo de 1998 e o Direct3D 11 e carregado
+   em tempo de execucao pelo wrapper, o RTSS no modo 'Low' pode nao injetar.
+   Para que o RivaTuner funcione:
+   1. Abra o RivaTuner Statistics Server (RTSS).
+   2. Clique no botao verde '+' (Add) no canto inferior esquerdo.
+   3. Selecione o arquivo ALPHA2.EXE da pasta do jogo.
+   4. No perfil do ALPHA2.EXE:
+      - Altere 'Application detection level' para 'High'.
+      - Certifique-se de que 'Show On-Screen Display' esta ativado ('ON').
+   5. Abra o jogo. O overlay do RivaTuner aparecera normalmente.
+
+--------------------------------------------------------------------------------
+4. MAPEAMENTO DO CONTROLE (CAPCOM CPS2 / 8BITDO M30 / XBOX)
+--------------------------------------------------------------------------------
+- Direcional Digital (D-Pad) e Analogico Esquerdo: Movimento / Pulos / Defesa
+- Linha Superior (Socos):
+  * X                      : Soco Fraco (Light Punch - LP)
+  * Y                      : Soco Medio (Medium Punch - MP)
+  * RB / Botao Z (M30)     : Soco Forte (Heavy Punch - HP)
+- Linha Inferior (Chutes):
+  * A                      : Chute Fraco (Light Kick - LK)
+  * B                      : Chute Medio (Medium Kick - MK)
+  * RT / Botao C (M30)     : Chute Forte (Heavy Kick - HK)
+- Macros (Ombros / Triggers):
+  * LB / Botao L           : Macro de 3 Socos (LP + MP + HP) -> Supers / Alpha Counters
+  * LT                     : Macro de 3 Chutes (LK + MK + HK) -> Supers / Alpha Counters
+- Sistema:
+  * START                  : Start
+  * BACK / VIEW / MINUS    : Ficha / Select
+
+--------------------------------------------------------------------------------
+5. SEPARACAO ESTATICA DE JOGADORES (P1 vs P2)
+--------------------------------------------------------------------------------
+- Controle Index 0 no Windows/XInput: Atribuido estritamente ao Player 1.
+- Controle Index 1 no Windows/XInput: Atribuido estritamente ao Player 2.
+- Se apenas 1 controle estiver conectado ao PC, o Player 2 permanece totalmente
+  inativo/desconectado (sem contaminacao de inputs ou ativacao acidental).
+
+--------------------------------------------------------------------------------
+6. PERSONALIZACAO (sfa2_patch.ini)
+--------------------------------------------------------------------------------
+Voce pode abrir o arquivo 'sfa2_patch.ini' em qualquer editor de texto:
+- Force60FPS = 1          : Trava o jogo a 60 FPS estritos sem pulos de quadro.
+- Player1_Index = 0       : Define qual controle e o Player 1.
+- Player2_Index = 1       : Define qual controle e o Player 2.
+- SwapTriggersBumpers = 1 : Troca RB por RT (se preferir HP no gatilho e HK no bumper).
+- EnableMacros = 0        : Desativa as macros de 3 socos / 3 chutes em LB e LT.
+- Deadzone = 7849         : Ajusta a sensibilidade da zona morta do analogico.
+
+--------------------------------------------------------------------------------
+7. DESINSTALACAO
+--------------------------------------------------------------------------------
+Basta deletar os 4 arquivos (ddraw.dll, DDrawCompat.ini, dinput.dll, sfa2_patch.ini)
+da pasta do jogo. O jogo voltara ao estado original da GOG.
+================================================================================
