@@ -88,10 +88,12 @@ Voce pode abrir o arquivo 'sfa2_patch.ini' em qualquer editor de texto:
 - ContinuousBGMOnKO = 1      : Mantem a musica do cenario tocando continuamente sem
                                mute/pausa durante o 'K.O.!' e transicao de rounds (Arcade).
 - DuckBGMOnSuperKO = 1       : Ducking seletivo de volume ao terminar com Super Combo.
+                               O fade ocorre no instante exato do flash/explosao na tela!
                                Se o golpe final for golpe normal ou especial (Shoryuken,
                                Hadouken, etc.), o volume continua a 100%. Se for Super,
-                               faz fade para o percentual abaixo.
+                               a musica baixa no flash da tela e ja fica a 30% no K.O.
 - SuperKOBGMVolumePercent = 30: Percentual do volume da musica no Super Finish (30%).
+- SuperKOFadeDurationMS = 250: Duracao do fade no momento do flash do Super (250ms).
 - Player1_Index = 0          : Define qual controle e o Player 1.
 - Player2_Index = 1          : Define qual controle e o Player 2.
 - SwapTriggersBumpers = 1    : Troca RB por RT (se preferir HP no gatilho e HK no bumper).

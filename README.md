@@ -26,8 +26,8 @@ This patch enables smooth 60 FPS gameplay on Windows 10 and Windows 11, translat
   * **Strict 2-Player Controller Isolation**: Controller Index 0 is exclusively assigned to Player 1, and Index 1 to Player 2. When only one controller is plugged in, Player 2 is kept completely disconnected—preventing phantom inputs or accidental 2P challenger starts.
 * **Arcade-Accurate Continuous BGM & Selective Super Combo Finish Ducking**:
   * In the 1998 PC release, Capcom implemented an intentional volume-ducking routine that faded out the stage BGM over 2 seconds whenever health reached 0, muting the music while the "K.O.!" voice played, before fading back in during the win pose.
-  * **Normal & Special Move Finishes**: When the round ends with normal attacks or regular special moves (Shoryuken, Hadouken, Tatsumaki, throws, etc.), the music now plays continuously and seamlessly at **100% volume** across the K.O. call, announcer voice, win pose, and straight into Round 2—matching original CPS2 arcade boards.
-  * **Super Combo Finishes**: When a round ends with a Super Combo (Super Finish), the patch detects the lethal move type in real-time (`*(BYTE*)0x00bdc5ae == 0xFF` and winner finish code `0x255 == 6`) and smoothly fades the BGM volume down to **30%** (configurable). This highlights the Super Finish background explosion and announcer voice while keeping the music playing in the background, smoothly restoring back to 100% volume when the next round begins.
+  * **Normal & Special Move Finishes**: When the round ends with normal attacks or regular special moves (Shoryuken, Hadouken, Tatsumaki, throws, etc.), the music plays continuously and seamlessly at **100% volume** across the K.O. call, announcer voice, win pose, and straight into Round 2—matching original CPS2 arcade boards.
+  * **Super Combo Finishes**: When a round ends with a Super Combo (Super Finish), the patch detects the lethal move type in real-time and hooks the Super Finish spawner (`0x004e31d5`), fading the BGM volume down to **30%** at the **exact moment the screen flashes with the yellow or blue explosion**. By the time the slow-motion tumble animation finishes and the announcer calls "K.O.!", the music is already at 30% volume. It smoothly restores back to 100% volume when the next round begins.
   * When the match is completely over (final round), the BGM cleanly fades out into the victory quotes / character stats screen.
 * **Locked 60 FPS & Frame-Skip Bypass**:
   * Overrides Capcom's legacy Pentium II "Auto Frame-Skip" mechanism in memory, preventing the engine from dynamically dropping down to 30, 20, or 15 FPS.
@@ -116,11 +116,15 @@ Player2_Index = 1
 ContinuousBGMOnKO = 1
 
 ; Selective BGM volume ducking on Super Combo finish (1 = Enabled, 0 = Disabled)
+; Triggered exactly when the screen flashes with the yellow or blue explosion.
 ; Normal & Special finishes (Shoryuken, Hadouken) stay at 100% volume.
 DuckBGMOnSuperKO = 1
 
 ; Target BGM volume percent during Super Combo finish (default: 30)
 SuperKOBGMVolumePercent = 30
+
+; Duration of the fade down in milliseconds right as the screen flashes (default: 250)
+SuperKOFadeDurationMS = 250
 
 [XInput]
 ; Enable native XInput hook (1 = Enabled, 0 = Disabled)
@@ -163,13 +167,11 @@ clang -target i686-w64-windows-gnu -shared -O2 -s src/dinput_xinput.c src/dinput
 ## Technical Architecture & Reversing Notes
 
 * **DirectSound Architecture & Independent Channels**: `ALPHA2.EXE` utilizes separate DirectSound secondary buffers (`IDirectSoundBuffer`) for Sound Effects (`[SoundManager + se_id*4 + 8]`) and Background Music (`[SoundManager + 0x4030]`). Sound effects and BGM do not collide or share physical channels.
-* **Super Combo Detection & Selective Ducking**:
-  * In the original PC port, when health hits 0, `0x00430a9b` called `0x00430ee9` (`BGM_Dispatch(6, 2)`), fading out music on *every* K.O.
-  * Our mod hooks `0x00430ee9` and inspects the lethal hit move flags:
-    1. Global Super Finish explosion spawner flag: `*(BYTE*)0x00bdc5ae == 0xFF`.
-    2. Winner entity lethal finish code: `*(BYTE*)(winner_obj + 0x255) == 6`.
-  * If the lethal hit is a **Normal move** or **Special move** (Hadouken, Shoryuken, normal attacks, throws), the hook returns immediately (`RET`), keeping the stage music playing at **100% volume** without interruption.
-  * If the lethal hit is a **Super Combo**, our state machine initiates a smooth 1.0-second linear logarithmic fade down to **30% volume** ($-1046\text{ mB}$ via DirectSound `SetVolume` on `*(IDirectSoundBuffer**)(0x009c9bc0 + 0x4030)`).
+* **Super Combo Screen Flash Detection & Instant Ducking**:
+  * In the original PC port, when health hits 0, `0x00430a9b` called `0x00430ee9` (`BGM_Dispatch(6, 2)`), fading out music on *every* K.O. after the fall animation.
+  * Our mod hooks the Super Finish Effect Spawner at `0x004e31d5` (the exact routine that initializes the yellow or blue palette-cycling explosion object 6) as well as inspecting `*(BYTE*)0x00bdc5ae == 0xFF` and `*(BYTE*)(winner_obj + 0x255) == 6`.
+  * **On Super Combo lethal hit**: As soon as the screen flashes with the Super Finish explosion, our hook triggers a fast 250ms fade down to **30% volume** ($-1046\text{ mB}$ via DirectSound `SetVolume`). By the time the slow-motion tumble animation finishes and the announcer calls "K.O.!", the music is already at 30% volume.
+  * **On Normal / Special move lethal hit**: Routine `0x004e31b0` is never called, `0x00bdc5ae` remains 0, and `0x00430ee9` is neutralized with `RET` (`0xC3`), keeping the stage music playing at **100% volume** uninterrupted.
   * When the next round begins (`battleState == 0` in `*(WORD*)(0x00be05b4 + 0x1c)`), the volume smoothly fades back up to 100% and resets the Super flag.
   * In the final match-deciding round, Capcom's natural match-end fade (`0x0042f406` / `0x00cae530 != 0`) is respected, cleanly transitioning to the victory screen.
 * **WinMM Hooking**: `ALPHA2.EXE` imports `joyGetPosEx` from `WINMM.dll` with an IAT entry at `0x00cb0684`. The game never queries `JOY_RETURNPOV` or `JOY_RETURNZ`, which caused the lack of D-Pad and trigger support on modern gamepads. Our wrapper intercepts `joyGetPosEx` calls, queries `XInputGetState`, and feeds translated coordinate and button masks directly to the game.

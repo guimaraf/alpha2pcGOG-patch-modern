@@ -90,6 +90,7 @@ static int g_cfgForce60FPS = 1;        /* Lock 60 FPS and disable engine frame s
 static int g_cfgContinuousBGMOnKO = 1; /* Keep BGM playing continuously on K.O. (Arcade CPS2 behavior) */
 static int g_cfgDuckBGMOnSuperKO = 1;  /* Duck BGM volume on Super KO finish */
 static int g_cfgSuperKOBGMVolumePercent = 30; /* Volume percentage on Super KO (default: 30%) */
+static int g_cfgSuperKOFadeDurationMS = 250;  /* Fade duration in ms when screen flashes (default: 250ms) */
 static int g_cfgLogEnabled = 0;
 
 static void LogMsg(const char* fmt, ...) {
@@ -126,12 +127,16 @@ static void LoadConfig(void) {
     if (g_cfgSuperKOBGMVolumePercent < 0) g_cfgSuperKOBGMVolumePercent = 0;
     if (g_cfgSuperKOBGMVolumePercent > 100) g_cfgSuperKOBGMVolumePercent = 100;
 
+    g_cfgSuperKOFadeDurationMS = GetPrivateProfileIntA("Audio", "SuperKOFadeDurationMS", 250, iniPath);
+    if (g_cfgSuperKOFadeDurationMS < 0) g_cfgSuperKOFadeDurationMS = 0;
+    if (g_cfgSuperKOFadeDurationMS > 5000) g_cfgSuperKOFadeDurationMS = 5000;
+
     g_cfgLogEnabled = GetPrivateProfileIntA("Debug", "EnableLog", 0, iniPath);
 
-    LogMsg("Config loaded: XInput=%d, Deadzone=%d, Macros=%d, SwapTB=%d, P1Index=%d, P2Index=%d, Force60FPS=%d, ContinuousBGM=%d, DuckSuper=%d, DuckVol=%d%%\n",
+    LogMsg("Config loaded: XInput=%d, Deadzone=%d, Macros=%d, SwapTB=%d, P1Index=%d, P2Index=%d, Force60FPS=%d, ContinuousBGM=%d, DuckSuper=%d, DuckVol=%d%%, FadeDur=%dms\n",
            g_cfgXInputEnabled, g_cfgDeadzone, g_cfgEnableMacros, g_cfgSwapTriggersBumpers,
            g_cfgPlayer1Index, g_cfgPlayer2Index, g_cfgForce60FPS, g_cfgContinuousBGMOnKO,
-           g_cfgDuckBGMOnSuperKO, g_cfgSuperKOBGMVolumePercent);
+           g_cfgDuckBGMOnSuperKO, g_cfgSuperKOBGMVolumePercent, g_cfgSuperKOFadeDurationMS);
 }
 
 static void InitXInput(void) {
@@ -224,45 +229,42 @@ static int g_duckState = DUCK_STATE_IDLE;
 static DWORD g_duckStartTime = 0;
 static LONG g_duckStartVolume = 0;
 static LONG g_duckTargetVolume = 0;
-#define DUCK_FADE_OUT_DURATION_MS 1000
 #define DUCK_FADE_IN_DURATION_MS  600
 
 static void StartBgmDucking(void) {
+    if (g_duckState != DUCK_STATE_IDLE) return;
+
     LONG baseVol = *(volatile LONG*)0x00c14584;
     if (baseVol < -10000 || baseVol > 0) baseVol = 0;
 
     g_duckStartVolume = baseVol;
     g_duckTargetVolume = PercentToDirectSoundVolume(g_cfgSuperKOBGMVolumePercent, baseVol);
     g_duckStartTime = timeGetTime();
-    g_duckState = DUCK_STATE_FADING_OUT;
-    LogMsg("Super Combo KO! Ducking BGM from %ld mB to %ld mB (%d%%) over %d ms\n",
-           g_duckStartVolume, g_duckTargetVolume, g_cfgSuperKOBGMVolumePercent, DUCK_FADE_OUT_DURATION_MS);
-}
 
-static void OnKOTriggered(void) {
-    int isSuper = IsSuperComboFinish();
-    LogMsg("KO triggered! IsSuperCombo=%d, flag(0xbdc5ae)=0x%02X\n",
-           isSuper, *(volatile BYTE*)0x00bdc5ae);
-
-    if (!g_cfgContinuousBGMOnKO) return;
-
-    if (g_cfgDuckBGMOnSuperKO && isSuper) {
-        StartBgmDucking();
+    if (g_cfgSuperKOFadeDurationMS <= 0) {
+        SetBgmVolume(g_duckTargetVolume);
+        g_duckState = DUCK_STATE_HOLD;
     } else {
-        /* Normal or Special move finish: maintain full volume */
-        if (g_duckState != DUCK_STATE_IDLE) {
-            LONG baseVol = *(volatile LONG*)0x00c14584;
-            if (baseVol < -10000 || baseVol > 0) baseVol = 0;
-            SetBgmVolume(baseVol);
-            g_duckState = DUCK_STATE_IDLE;
-        }
-        LogMsg("Normal/Special move KO finish. Maintaining full 100%% BGM volume.\n");
+        g_duckState = DUCK_STATE_FADING_OUT;
     }
+
+    LogMsg("Super Finish flash started! Ducking BGM from %ld mB to %ld mB (%d%%) over %d ms\n",
+           g_duckStartVolume, g_duckTargetVolume, g_cfgSuperKOBGMVolumePercent, g_cfgSuperKOFadeDurationMS);
 }
 
-static void __cdecl MyKOFadeOutHook(void* pArg) {
-    (void)pArg;
-    OnKOTriggered();
+/*
+ * Hooked Super Finish Spawner at 0x004e31d5
+ * Called on the EXACT frame the yellow or blue screen flash / explosion begins.
+ */
+typedef void* (__cdecl *PFN_AllocObject)(int a1, int a2, int a3);
+static PFN_AllocObject g_pfnRealAllocObject = (PFN_AllocObject)0x00549877;
+
+static void* __cdecl Hooked_SpawnSuperFinishObject(int a1, int a2, int a3) {
+    LogMsg("Super Finish explosion spawned at 0x004e31d5! Screen flash beginning.\n");
+    if (g_cfgContinuousBGMOnKO && g_cfgDuckBGMOnSuperKO) {
+        StartBgmDucking();
+    }
+    return g_pfnRealAllocObject(a1, a2, a3);
 }
 
 static void UpdateBgmDucking(void) {
@@ -299,17 +301,25 @@ static void UpdateBgmDucking(void) {
         }
     }
 
-    if (g_duckState == DUCK_STATE_IDLE) return;
+    /* If idle, check if a Super Finish explosion has just begun (fallback to hook) */
+    if (g_duckState == DUCK_STATE_IDLE) {
+        if (IsSuperComboFinish()) {
+            StartBgmDucking();
+        } else {
+            return;
+        }
+    }
 
     DWORD now = timeGetTime();
     DWORD elapsed = now - g_duckStartTime;
 
     if (g_duckState == DUCK_STATE_FADING_OUT) {
-        if (elapsed >= DUCK_FADE_OUT_DURATION_MS) {
+        DWORD duration = (DWORD)g_cfgSuperKOFadeDurationMS;
+        if (duration == 0 || elapsed >= duration) {
             SetBgmVolume(g_duckTargetVolume);
             g_duckState = DUCK_STATE_HOLD;
         } else {
-            float t = (float)elapsed / (float)DUCK_FADE_OUT_DURATION_MS;
+            float t = (float)elapsed / (float)duration;
             LONG curVol = g_duckStartVolume + (LONG)(t * (float)(g_duckTargetVolume - g_duckStartVolume));
             SetBgmVolume(curVol);
         }
@@ -597,18 +607,28 @@ static void ApplyAudioPatches(void) {
 
     DWORD oldProtect;
 
-    /* 1. Hook K.O. Fade Out function at 0x00430ee9 to selectively duck on Super Finish */
-    BYTE* pKOFadeFunc = (BYTE*)0x00430ee9;
-    if (VirtualProtect(pKOFadeFunc, 5, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-        pKOFadeFunc[0] = 0xE9; /* JMP rel32 */
-        *(DWORD*)(pKOFadeFunc + 1) = (DWORD)MyKOFadeOutHook - ((DWORD)0x00430ee9 + 5);
-        VirtualProtect(pKOFadeFunc, 5, oldProtect, &oldProtect);
-        LogMsg("Applied audio patch: hooked K.O. BGM handler at 0x00430ee9 -> %p\n", MyKOFadeOutHook);
+    /* 1. Hook Super Finish Spawner at 0x004e31d5 to trigger volume ducking on the screen flash */
+    BYTE* pSpawnCall = (BYTE*)0x004e31d5;
+    if (VirtualProtect(pSpawnCall, 5, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        pSpawnCall[0] = 0xE8; /* CALL rel32 */
+        *(DWORD*)(pSpawnCall + 1) = (DWORD)Hooked_SpawnSuperFinishObject - ((DWORD)0x004e31d5 + 5);
+        VirtualProtect(pSpawnCall, 5, oldProtect, &oldProtect);
+        LogMsg("Applied audio patch: hooked Super Finish spawner at 0x004e31d5 -> %p\n", Hooked_SpawnSuperFinishObject);
     } else {
-        LogMsg("Failed to patch K.O. BGM handler at 0x00430ee9\n");
+        LogMsg("Failed to hook Super Finish spawner at 0x004e31d5\n");
     }
 
-    /* 2. NOP out win pose Fade In call at 0x00430494 (12 bytes) */
+    /* 2. Neutralize original K.O. Fade Out function at 0x00430ee9 with RET */
+    BYTE* pKOFadeFunc = (BYTE*)0x00430ee9;
+    if (VirtualProtect(pKOFadeFunc, 1, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        *pKOFadeFunc = 0xC3; /* ret */
+        VirtualProtect(pKOFadeFunc, 1, oldProtect, &oldProtect);
+        LogMsg("Applied audio patch: neutralized K.O. BGM Fade Out at 0x00430ee9 (RET)\n");
+    } else {
+        LogMsg("Failed to patch K.O. BGM Fade Out at 0x00430ee9\n");
+    }
+
+    /* 3. NOP out win pose Fade In call at 0x00430494 (12 bytes) */
     BYTE* pWinPoseFadeIn = (BYTE*)0x00430494;
     if (VirtualProtect(pWinPoseFadeIn, 12, PAGE_EXECUTE_READWRITE, &oldProtect)) {
         memset(pWinPoseFadeIn, 0x90, 12); /* 12 NOPs */
