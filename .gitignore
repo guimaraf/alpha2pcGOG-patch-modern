@@ -2,5 +2,6 @@
 *.obj
 *.o
 *.bak
+*.zip
 .DS_Store
 Thumbs.db

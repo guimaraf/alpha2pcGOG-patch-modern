@@ -1,0 +1,108 @@
+name: Package and Release Patch
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]+.*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag de versão para a release (ex: v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      release_title:
+        description: 'Título da Release'
+        required: false
+        default: 'Street Fighter Alpha 2 Modern Patch'
+      prerelease:
+        description: 'Marcar como pré-release?'
+        type: boolean
+        default: false
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Package alpha2gogModernPatch.zip & Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify required files exist
+        run: |
+          REQUIRED_FILES=("ddraw.dll" "DDrawCompat.ini" "dinput.dll" "sfa2_patch.ini" "LEIAME.txt")
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "::error file=$file::Arquivo obrigatório não encontrado: $file"
+              exit 1
+            fi
+          done
+          echo "Todos os 5 arquivos foram localizados com sucesso."
+
+      - name: Create release ZIP (alpha2gogModernPatch.zip)
+        run: |
+          zip -j alpha2gogModernPatch.zip \
+            ddraw.dll \
+            DDrawCompat.ini \
+            dinput.dll \
+            sfa2_patch.ini \
+            LEIAME.txt
+
+          echo "::group::Conteúdo do pacote alpha2gogModernPatch.zip"
+          unzip -l alpha2gogModernPatch.zip
+          echo "::endgroup::"
+
+      - name: Determine Tag, Title and Notes
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+            TITLE="${{ github.event.inputs.release_title }}"
+            PRERELEASE="${{ github.event.inputs.prerelease }}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+            TITLE="${{ github.event.release.name }}"
+            PRERELEASE="${{ github.event.release.prerelease }}"
+          else
+            TAG="${{ github.ref_name }}"
+            TITLE="Street Fighter Alpha 2 - Modern Patch ${{ github.ref_name }}"
+            PRERELEASE="false"
+          fi
+
+          if [ -z "$TITLE" ]; then
+            TITLE="Street Fighter Alpha 2 - Modern Patch $TAG"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload alpha2gogModernPatch.zip to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.title }}
+          target_commitish: ${{ github.sha }}
+          files: alpha2gogModernPatch.zip
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
+          draft: false
+          generate_release_notes: true
+          body: |
+            ### 📦 Conteúdo do Pacote (`alpha2gogModernPatch.zip`)
+            - `ddraw.dll` - DDrawCompat v0.7.2 (DirectDraw 3 -> Direct3D 11)
+            - `DDrawCompat.ini` - Configuração gráfica (FullHD/4K, 4:3 pillarboxing, borderless)
+            - `dinput.dll` - Wrapper DirectInput para XInput moderno + trava de 60 FPS
+            - `sfa2_patch.ini` - Configuração de controles e gameplay
+            - `LEIAME.txt` - Instruções de instalação e layout de controles
+
+            ### 🚀 Como Instalar
+            1. Baixe o arquivo **`alpha2gogModernPatch.zip`** abaixo.
+            2. Extraia os arquivos diretamente na pasta onde o seu **Street Fighter Alpha 2** da GOG está instalado (junto do executável `ALPHA2.EXE`).
+            3. Inicie o jogo normalmente pelo atalho da GOG ou executável.

@@ -1,5 +1,7 @@
 # Street Fighter Alpha 2 (PC / GOG, 1998) - Modernization & XInput Patch
 
+[![Latest Release](https://img.shields.io/github/v/release/guimaraf/alpha2pcGOG-patch-modern?color=brightgreen&label=Latest%20Release)](https://github.com/guimaraf/alpha2pcGOG-patch-modern/releases/latest)
+[![Download Patch](https://img.shields.io/badge/Download-alpha2gogModernPatch.zip-blue?logo=github)](https://github.com/guimaraf/alpha2pcGOG-patch-modern/releases/latest)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg)](https://www.microsoft.com/windows)
 [![Compatibility](https://img.shields.io/badge/Release-GOG%20Classic-green.svg)](https://www.gog.com/)
 [![Graphics](https://img.shields.io/badge/Renderer-Direct3D%2011-orange.svg)](#graphics-and-display)
@@ -45,17 +47,18 @@ This patch enables smooth 60 FPS gameplay on Windows 10 and Windows 11, translat
 
 ---
 
-## Installation (GOG Version)
+## Download & Installation (GOG Version)
 
-1. Download or clone this repository.
-2. Copy the following files directly into your **Street Fighter Alpha 2** game installation directory (where `ALPHA2.EXE` is located):
+1. Download **[`alpha2gogModernPatch.zip`](https://github.com/guimaraf/alpha2pcGOG-patch-modern/releases/latest)** from the **[Releases](https://github.com/guimaraf/alpha2pcGOG-patch-modern/releases/latest)** section.
+2. Extract all contents directly into your **Street Fighter Alpha 2** game installation directory (where `ALPHA2.EXE` is located):
    * `ddraw.dll`
    * `DDrawCompat.ini`
    * `dinput.dll`
    * `sfa2_patch.ini`
+   * `LEIAME.txt`
 3. Launch the game normally via the GOG shortcut or by executing `ALPHA2.EXE`.
 
-To uninstall, simply delete those 4 files.
+To uninstall, simply delete those files from the game folder.
 
 ---
 

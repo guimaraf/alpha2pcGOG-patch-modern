@@ -22,12 +22,13 @@ e renderizacao em Direct3D 11.
 --------------------------------------------------------------------------------
 2. COMO INSTALAR NA SUA COPIA DA GOG
 --------------------------------------------------------------------------------
-1. Copie os seguintes arquivos da pasta 'patch' diretamente para a pasta raiz onde
+1. Extraia ou copie os arquivos do pacote diretamente para a pasta raiz onde
    o jogo esta instalado (onde se encontra o ALPHA2.EXE):
      - ddraw.dll
      - DDrawCompat.ini
      - dinput.dll
      - sfa2_patch.ini
+     - LEIAME.txt
 2. Execute o jogo normalmente pelo atalho da GOG ou pelo ALPHA2.EXE.
 3. Nao e necessario substituir nem modificar o executavel original.
 
