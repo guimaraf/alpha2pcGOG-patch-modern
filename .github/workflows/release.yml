@@ -8,15 +8,15 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag de versão para a release (ex: v1.0.0)'
+        description: 'Release version tag (e.g. v1.0.0)'
         required: true
         default: 'v1.0.0'
       release_title:
-        description: 'Título da Release'
+        description: 'Release title'
         required: false
         default: 'Street Fighter Alpha 2 Modern Patch'
       prerelease:
-        description: 'Marcar como pré-release?'
+        description: 'Mark as pre-release'
         type: boolean
         default: false
   release:
@@ -39,11 +39,11 @@ jobs:
           REQUIRED_FILES=("ddraw.dll" "DDrawCompat.ini" "dinput.dll" "sfa2_patch.ini" "LEIAME.txt")
           for file in "${REQUIRED_FILES[@]}"; do
             if [ ! -f "$file" ]; then
-              echo "::error file=$file::Arquivo obrigatório não encontrado: $file"
+              echo "::error file=$file::Required file not found: $file"
               exit 1
             fi
           done
-          echo "Todos os 5 arquivos foram localizados com sucesso."
+          echo "All 5 required files located successfully."
 
       - name: Create release ZIP (alpha2gogModernPatch.zip)
         run: |
@@ -54,7 +54,7 @@ jobs:
             sfa2_patch.ini \
             LEIAME.txt
 
-          echo "::group::Conteúdo do pacote alpha2gogModernPatch.zip"
+          echo "::group::Archive contents (alpha2gogModernPatch.zip)"
           unzip -l alpha2gogModernPatch.zip
           echo "::endgroup::"
 
@@ -95,14 +95,14 @@ jobs:
           draft: false
           generate_release_notes: true
           body: |
-            ### 📦 Conteúdo do Pacote (`alpha2gogModernPatch.zip`)
-            - `ddraw.dll` - DDrawCompat v0.7.2 (DirectDraw 3 -> Direct3D 11)
-            - `DDrawCompat.ini` - Configuração gráfica (FullHD/4K, 4:3 pillarboxing, borderless)
-            - `dinput.dll` - Wrapper DirectInput para XInput moderno + trava de 60 FPS
-            - `sfa2_patch.ini` - Configuração de controles e gameplay
-            - `LEIAME.txt` - Instruções de instalação e layout de controles
+            ### 📦 Package Contents (`alpha2gogModernPatch.zip`)
+            - `ddraw.dll` - DDrawCompat v0.7.2 (DirectDraw 3 to Direct3D 11 translation layer)
+            - `DDrawCompat.ini` - Graphics configuration (native desktop resolution, integer 4:3 point scaling, borderless fullscreen)
+            - `dinput.dll` - DirectInput proxy with native XInput controller support and 60 FPS lock
+            - `sfa2_patch.ini` - Configuration file for controllers, audio, and gameplay settings
+            - `LEIAME.txt` - Instructions and button mapping reference
 
-            ### 🚀 Como Instalar
-            1. Baixe o arquivo **`alpha2gogModernPatch.zip`** abaixo.
-            2. Extraia os arquivos diretamente na pasta onde o seu **Street Fighter Alpha 2** da GOG está instalado (junto do executável `ALPHA2.EXE`).
-            3. Inicie o jogo normalmente pelo atalho da GOG ou executável.
+            ### 🚀 Quick Installation (GOG Release)
+            1. Download **`alpha2gogModernPatch.zip`** below under **Assets**.
+            2. Extract all contents directly into your **Street Fighter Alpha 2** game installation directory (where `ALPHA2.EXE` is located).
+            3. Launch the game normally via the GOG shortcut or `ALPHA2.EXE`.
